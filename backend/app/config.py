@@ -29,7 +29,7 @@ CONFIG_WEBHOOKS_TABLE = os.getenv("CONFIG_WEBHOOKS_TABLE", "sb_config_webhooks")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 MISTRAL_LLM_MODEL = os.getenv("MISTRAL_LLM_MODEL", "mistral-large-latest")
 MISTRAL_STT_MODEL = os.getenv("MISTRAL_STT_MODEL", "")
-MISTRAL_TTS_MODEL = os.getenv("MISTRAL_TTS_MODEL", "")
+MISTRAL_TTS_MODEL = os.getenv("MISTRAL_TTS_MODEL", "voxtral-mini-tts-2603")
 
 # Encryption key for provider API keys at rest (Fernet)
 PROVIDER_KEY_ENCRYPTION_KEY = os.getenv("PROVIDER_KEY_ENCRYPTION_KEY", "")

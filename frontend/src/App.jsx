@@ -1,18 +1,15 @@
 import { useEffect, useRef, useState } from "react"
 import {
   createUser,
-  detectIntent,
-  getMessages,
   getStats,
-  getSession,
   listAuditLog,
   listProviders,
   listUsers,
   login,
   logout,
   me,
+  processAudio,
   startSession,
-  transcribeAudio,
   updateUser,
   upsertProvider,
 } from "./api"
@@ -219,10 +216,13 @@ function VoiceView({ user, onLogout, onAdmin }) {
     { role: "assistant", content: "Wie kann ich Ihnen helfen?", id: "init" },
   ])
   const [transcript, setTranscript] = useState("")
-  const [intentDebug, setIntentDebug] = useState(null)
-  const [error, setError] = useState("")
+  const [processing, setProcessing] = useState(false)
+  const [ttsEnabled, setTtsEnabled] = useState(true)
+  const [debugData, setDebugData] = useState(null)
   const [showDebug, setShowDebug] = useState(false)
+  const [error, setError] = useState("")
   const chatRef = useRef(null)
+  const audioRef = useRef(null)
   const isAdmin = user.roles?.includes("ADMIN") || user.roles?.includes("OPERATOR")
 
   useEffect(() => {
@@ -235,42 +235,81 @@ function VoiceView({ user, onLogout, onAdmin }) {
 
   async function handleTranscript(blob, mimeType) {
     if (!session) throw new Error("Keine aktive Session")
-
     setError("")
-    const result = await transcribeAudio(session.id, blob, mimeType)
-    const text = result.transcript
+    setTranscript("")
+    setProcessing(true)
 
-    if (!text) {
-      setTranscript("(Kein Text erkannt)")
-      return
-    }
-    setTranscript(text)
+    try {
+      const result = await processAudio(session.id, blob, mimeType)
 
-    // User-Nachricht anzeigen
-    setMessages(m => [...m, { id: result.session_id + Date.now(), role: "user", content: text }])
+      if (!result.transcript) {
+        setTranscript("(Kein Text erkannt)")
+        return
+      }
 
-    // Intent erkennen
-    const intentResult = await detectIntent(session.id, text)
-    setIntentDebug(intentResult)
+      setTranscript(result.transcript)
+      setDebugData(result)
 
-    // Bot-Antwort anzeigen
-    if (intentResult.reply) {
+      // Nutzer-Nachricht anzeigen
       setMessages(m => [...m, {
-        id: "bot" + Date.now(),
-        role: "assistant",
-        content: intentResult.reply,
+        id: "u" + Date.now(),
+        role: "user",
+        content: result.transcript,
       }])
+
+      // Bot-Antwort anzeigen
+      if (result.reply) {
+        setMessages(m => [...m, {
+          id: "a" + Date.now(),
+          role: "assistant",
+          content: result.reply,
+          action: result.action,
+        }])
+      }
+
+      // TTS abspielen
+      if (ttsEnabled && result.audio_b64) {
+        playAudio(result.audio_b64, result.audio_format || "mp3")
+      }
+
+      // Session nach Abschluss neu starten
+      if (result.action === "complete") {
+        const s = await startSession()
+        setSession(s)
+      }
+    } finally {
+      setProcessing(false)
     }
   }
 
+  function playAudio(b64, format) {
+    const binary = atob(b64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    const blob = new Blob([bytes], { type: `audio/${format}` })
+    const url = URL.createObjectURL(blob)
+    if (audioRef.current) {
+      audioRef.current.pause()
+      URL.revokeObjectURL(audioRef.current.src)
+    }
+    const audio = new Audio(url)
+    audioRef.current = audio
+    audio.play().catch(() => {})
+  }
+
   async function handleReset() {
+    if (audioRef.current) audioRef.current.pause()
     const s = await startSession()
     setSession(s)
     setMessages([{ role: "assistant", content: "Wie kann ich Ihnen helfen?", id: "init" }])
     setTranscript("")
-    setIntentDebug(null)
+    setDebugData(null)
     setError("")
   }
+
+  const statusText = processing
+    ? "Verarbeite..."
+    : transcript || "Transkription erscheint hier..."
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, display: "flex", flexDirection: "column" }}>
@@ -290,9 +329,7 @@ function VoiceView({ user, onLogout, onAdmin }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{user.username}</span>
-          {isAdmin && (
-            <Btn small variant="outline" onClick={onAdmin}>Admin</Btn>
-          )}
+          {isAdmin && <Btn small variant="outline" onClick={onAdmin}>Admin</Btn>}
           <Btn small variant="outline" onClick={handleReset}>Neu starten</Btn>
           <Btn small variant="outline" onClick={onLogout}>Abmelden</Btn>
         </div>
@@ -321,18 +358,47 @@ function VoiceView({ user, onLogout, onAdmin }) {
             </div>
           </div>
         ))}
+
+        {/* Ladeindikator */}
+        {processing && (
+          <div style={{ display: "flex", justifyContent: "flex-start" }}>
+            <div style={{
+              padding: "10px 16px", borderRadius: "16px 16px 16px 4px",
+              background: C.surface, border: `1px solid ${C.border}`,
+              fontSize: 14, color: C.muted,
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              <span style={{
+                display: "inline-block", width: 8, height: 8, borderRadius: "50%",
+                background: C.primary,
+                animation: "pulse 1s infinite",
+              }} />
+              <span style={{
+                display: "inline-block", width: 8, height: 8, borderRadius: "50%",
+                background: C.primary, opacity: 0.6,
+                animation: "pulse 1s 0.2s infinite",
+              }} />
+              <span style={{
+                display: "inline-block", width: 8, height: 8, borderRadius: "50%",
+                background: C.primary, opacity: 0.3,
+                animation: "pulse 1s 0.4s infinite",
+              }} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Input area */}
       <div style={{ background: C.surface, borderTop: `1px solid ${C.border}`, padding: "20px 24px", flexShrink: 0 }}>
-        <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-          {/* Transkription */}
+        <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+
           <div style={{
             width: "100%", minHeight: 38, padding: "8px 14px",
             borderRadius: 8, background: C.bg, border: `1px solid ${C.border}`,
-            fontSize: 13, color: transcript ? C.text : C.muted, textAlign: "center",
+            fontSize: 13, color: processing ? C.muted : (transcript ? C.text : C.muted),
+            textAlign: "center", fontStyle: processing ? "italic" : "normal",
           }}>
-            {transcript || "Transkription erscheint hier..."}
+            {statusText}
           </div>
 
           <ErrorBanner msg={error} />
@@ -340,30 +406,40 @@ function VoiceView({ user, onLogout, onAdmin }) {
           <VoiceRecorder
             onTranscript={handleTranscript}
             onError={setError}
-            disabled={!session}
+            disabled={!session || processing}
           />
 
-          {/* Debug-Panel Toggle */}
-          <button
-            onClick={() => setShowDebug(d => !d)}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              fontSize: 12, color: C.muted,
-            }}
-          >
-            {showDebug ? "▲" : "▼"} Debug
-          </button>
+          {/* TTS Toggle + Debug */}
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <button
+              onClick={() => setTtsEnabled(t => !t)}
+              style={{
+                padding: "4px 12px", borderRadius: 20, cursor: "pointer",
+                border: `1px solid ${C.border}`, fontSize: 12, fontWeight: 500,
+                background: ttsEnabled ? C.primary + "15" : C.bg,
+                color: ttsEnabled ? C.primary : C.muted,
+              }}
+            >
+              🔊 Sprachausgabe {ttsEnabled ? "ein" : "aus"}
+            </button>
+            <button
+              onClick={() => setShowDebug(d => !d)}
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: C.muted }}
+            >
+              {showDebug ? "▲" : "▼"} Debug
+            </button>
+          </div>
 
-          {showDebug && intentDebug && (
+          {showDebug && debugData && (
             <div style={{
               width: "100%", padding: "12px 14px", borderRadius: 8,
               background: "#1e1e2e", color: "#cdd6f4",
               fontSize: 12, fontFamily: "monospace", textAlign: "left",
               maxHeight: 200, overflowY: "auto",
             }}>
-              <div style={{ color: "#a6e3a1", marginBottom: 4 }}>Intent-Erkennung</div>
+              <div style={{ color: "#a6e3a1", marginBottom: 4 }}>Turn-Result</div>
               <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-                {JSON.stringify(intentDebug, null, 2)}
+                {JSON.stringify(debugData, null, 2)}
               </pre>
             </div>
           )}

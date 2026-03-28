@@ -48,12 +48,12 @@ export const startSession = () => request("POST", "/api/sessions")
 export const getSession = (id) => request("GET", `/api/sessions/${id}`)
 export const getMessages = (id) => request("GET", `/api/sessions/${id}/messages`)
 
-export const transcribeAudio = async (sessionId, blob, mimeType) => {
+export const processAudio = async (sessionId, blob, mimeType) => {
   const token = getToken()
   const form = new FormData()
   const ext = mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") ? "mp4" : "webm"
   form.append("audio", blob, `audio.${ext}`)
-  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/transcribe`, {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/process`, {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form,
@@ -63,8 +63,7 @@ export const transcribeAudio = async (sessionId, blob, mimeType) => {
   return data
 }
 
-export const detectIntent = (sessionId, text) =>
-  request("POST", `/api/sessions/${sessionId}/detect-intent`, { text })
+export const tts = (text) => request("POST", "/api/tts", { text })
 
 // Provider-Konfiguration (Admin)
 export const listProviders = () => request("GET", "/api/admin/providers")

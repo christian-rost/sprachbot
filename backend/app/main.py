@@ -16,6 +16,15 @@ from .auth import (
 from .audit_storage import list_events, log_event
 from .config import ADMIN_PASSWORD, ADMIN_USERNAME, CORS_ORIGINS
 from .config_storage import get_provider_config, list_provider_configs, upsert_provider_config
+from .flow_engine import process_turn
+from .flow_storage import (
+    create_flow,
+    delete_flow,
+    get_flow,
+    list_flows,
+    seed_example_flows,
+    update_flow,
+)
 from .mistral_client import MistralError
 from .session_storage import (
     add_message,
@@ -26,6 +35,7 @@ from .session_storage import (
     update_session,
 )
 from .stt_service import transcribe, validate_audio
+from .tts_service import synthesize
 from .user_storage import bootstrap_admin, create_user, list_users, update_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -91,6 +101,7 @@ def on_startup():
             logger.info("Admin user ready: %s", user["username"])
     else:
         logger.warning("ADMIN_USERNAME / ADMIN_PASSWORD not set — no admin bootstrapped")
+    seed_example_flows()
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +367,184 @@ def detect_intent_endpoint(
         "reply": reply,
         "session_id": session_id,
     }
+
+
+# ---------------------------------------------------------------------------
+# Kompletter Turn — STT + Flow-Engine + TTS
+# ---------------------------------------------------------------------------
+
+@app.post("/api/sessions/{session_id}/process")
+async def process_session_turn(
+    session_id: str,
+    audio: UploadFile = File(...),
+    current_user: Dict = Depends(get_current_user),
+):
+    """
+    Kompletter Sprach-Turn:
+    1. Audio → STT (Transkription)
+    2. Text → Flow-Engine (Intent + Slots + Rückfrage/Aktion)
+    3. Antwort → TTS (Audio)
+    Returns: transcript, reply, audio_b64, intent, slots, action
+    """
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden")
+    if session["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Kein Zugriff")
+    if session["status"] != "active":
+        raise HTTPException(status_code=400, detail="Session ist nicht aktiv")
+
+    # 1. STT
+    data = await audio.read()
+    try:
+        validate_audio(data, audio.content_type, audio.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        stt_result = transcribe(
+            audio_data=data,
+            filename=audio.filename or "audio.webm",
+            content_type=audio.content_type or "audio/webm",
+        )
+    except MistralError as e:
+        raise HTTPException(status_code=502, detail=f"STT-Fehler: {e}")
+
+    transcript = stt_result["text"]
+    if not transcript:
+        return {"transcript": "", "reply": None, "audio_b64": None, "intent": None, "slots": {}, "action": None}
+
+    # Nutzer-Nachricht speichern
+    add_message(session_id, role="user", content=transcript, metadata={"source": "stt"})
+    messages = list_messages(session_id)
+
+    # 2. Flow-Engine
+    turn_result = process_turn(
+        user_text=transcript,
+        session=session,
+        messages=messages[:-1],  # Ohne die gerade gespeicherte Nachricht
+    )
+
+    reply = turn_result["reply"]
+    updated = turn_result.get("updated_session", {})
+
+    # Session aktualisieren
+    if updated:
+        update_session(session_id, updated)
+
+    # Bot-Antwort speichern
+    add_message(session_id, role="assistant", content=reply, metadata={
+        "intent": turn_result.get("intent"),
+        "slots": turn_result.get("slots"),
+        "action": turn_result.get("action"),
+    })
+
+    # Audit bei Abschluss
+    if turn_result.get("action") == "complete":
+        log_event(
+            event_type="session_completed",
+            actor_user_id=current_user["id"],
+            entity_type="session",
+            entity_id=session_id,
+            details={"intent": turn_result.get("intent"), "slots": turn_result.get("slots")},
+        )
+
+    # 3. TTS
+    import base64
+    audio_b64 = None
+    try:
+        audio_bytes = synthesize(reply)
+        audio_b64 = base64.b64encode(audio_bytes).decode()
+    except MistralError as e:
+        logger.warning("TTS fehlgeschlagen (non-fatal): %s", e)
+
+    return {
+        "transcript": transcript,
+        "reply": reply,
+        "audio_b64": audio_b64,
+        "audio_format": "mp3",
+        "intent": turn_result.get("intent"),
+        "slots": turn_result.get("slots", {}),
+        "action": turn_result.get("action"),
+        "flow_id": turn_result.get("flow_id"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# TTS — Standalone Endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/api/tts")
+def tts_endpoint(body: Dict, current_user: Dict = Depends(get_current_user)):
+    import base64
+    text = body.get("text", "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Kein Text angegeben")
+    if len(text) > 1000:
+        raise HTTPException(status_code=422, detail="Text zu lang (max. 1000 Zeichen)")
+    try:
+        audio_bytes = synthesize(text)
+        return {"audio_b64": base64.b64encode(audio_bytes).decode(), "format": "mp3"}
+    except MistralError as e:
+        raise HTTPException(status_code=502, detail=f"TTS-Fehler: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Flows (Admin)
+# ---------------------------------------------------------------------------
+
+class FlowDefinitionIn(BaseModel):
+    name: str
+    intent_name: str
+    definition: Dict
+    description: Optional[str] = ""
+    system_prompt: Optional[str] = None
+    priority: Optional[int] = 0
+
+
+@app.get("/api/admin/flows")
+def admin_list_flows(current_user: Dict = Depends(require_admin_or_operator)):
+    return list_flows()
+
+
+@app.get("/api/admin/flows/{flow_id}")
+def admin_get_flow(flow_id: str, current_user: Dict = Depends(require_admin_or_operator)):
+    flow = get_flow(flow_id)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow nicht gefunden")
+    return flow
+
+
+@app.post("/api/admin/flows", status_code=201)
+def admin_create_flow(body: FlowDefinitionIn, current_user: Dict = Depends(require_admin)):
+    flow = create_flow(
+        name=body.name,
+        intent_name=body.intent_name,
+        definition=body.definition,
+        description=body.description or "",
+        system_prompt=body.system_prompt,
+        priority=body.priority or 0,
+        created_by=current_user["id"],
+    )
+    log_event("flow_created", current_user["id"], "flow", flow["id"], {"name": flow["name"]})
+    return flow
+
+
+@app.put("/api/admin/flows/{flow_id}")
+def admin_update_flow(flow_id: str, body: Dict, current_user: Dict = Depends(require_admin)):
+    flow = update_flow(flow_id, body)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Flow nicht gefunden")
+    log_event("flow_updated", current_user["id"], "flow", flow_id, {"fields": list(body.keys())})
+    return flow
+
+
+@app.delete("/api/admin/flows/{flow_id}", status_code=204)
+def admin_delete_flow(flow_id: str, current_user: Dict = Depends(require_admin)):
+    if not delete_flow(flow_id):
+        raise HTTPException(status_code=404, detail="Flow nicht gefunden")
+    log_event("flow_deleted", current_user["id"], "flow", flow_id)
+    return None
 
 
 # ---------------------------------------------------------------------------

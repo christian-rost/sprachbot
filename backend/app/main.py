@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 
@@ -15,6 +15,17 @@ from .auth import (
 )
 from .audit_storage import list_events, log_event
 from .config import ADMIN_PASSWORD, ADMIN_USERNAME, CORS_ORIGINS
+from .config_storage import get_provider_config, list_provider_configs, upsert_provider_config
+from .mistral_client import MistralError
+from .session_storage import (
+    add_message,
+    create_session,
+    get_session,
+    list_messages,
+    list_sessions,
+    update_session,
+)
+from .stt_service import transcribe, validate_audio
 from .user_storage import bootstrap_admin, create_user, list_users, update_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -206,13 +217,205 @@ def admin_stats(current_user: Dict = Depends(require_admin_or_operator)):
 
 
 # ---------------------------------------------------------------------------
+# Sessions
+# ---------------------------------------------------------------------------
+
+class SessionOut(BaseModel):
+    id: str
+    user_id: str
+    status: str
+    intent: Optional[str] = None
+    slots: Dict = {}
+    turn_count: int = 0
+    created_at: str
+    updated_at: str
+
+
+@app.post("/api/sessions", response_model=SessionOut, status_code=201)
+def start_session(current_user: Dict = Depends(get_current_user)):
+    session = create_session(user_id=current_user["id"])
+    log_event(
+        event_type="session_started",
+        actor_user_id=current_user["id"],
+        entity_type="session",
+        entity_id=session["id"],
+    )
+    return SessionOut(**{k: session[k] for k in SessionOut.model_fields if k in session})
+
+
+@app.get("/api/sessions/{session_id}", response_model=SessionOut)
+def get_session_endpoint(session_id: str, current_user: Dict = Depends(get_current_user)):
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden")
+    if session["user_id"] != current_user["id"] and not _is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Kein Zugriff")
+    return SessionOut(**{k: session[k] for k in SessionOut.model_fields if k in session})
+
+
+@app.get("/api/sessions/{session_id}/messages")
+def get_messages(session_id: str, current_user: Dict = Depends(get_current_user)):
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden")
+    if session["user_id"] != current_user["id"] and not _is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Kein Zugriff")
+    return list_messages(session_id)
+
+
+# ---------------------------------------------------------------------------
+# STT — Audio Transkription
+# ---------------------------------------------------------------------------
+
+@app.post("/api/sessions/{session_id}/transcribe")
+async def transcribe_audio(
+    session_id: str,
+    audio: UploadFile = File(...),
+    current_user: Dict = Depends(get_current_user),
+):
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden")
+    if session["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Kein Zugriff")
+    if session["status"] != "active":
+        raise HTTPException(status_code=400, detail="Session ist nicht aktiv")
+
+    data = await audio.read()
+    try:
+        validate_audio(data, audio.content_type, audio.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        result = transcribe(
+            audio_data=data,
+            filename=audio.filename or "audio.webm",
+            content_type=audio.content_type or "audio/webm",
+        )
+    except MistralError as e:
+        raise HTTPException(status_code=502, detail=f"STT-Fehler: {e}")
+
+    text = result["text"]
+    if text:
+        add_message(session_id, role="user", content=text, metadata={"source": "stt"})
+
+    return {
+        "transcript": text,
+        "language": result.get("language"),
+        "duration": result.get("duration"),
+        "session_id": session_id,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Intent-Erkennung
+# ---------------------------------------------------------------------------
+
+@app.post("/api/sessions/{session_id}/detect-intent")
+def detect_intent_endpoint(
+    session_id: str,
+    body: Dict,
+    current_user: Dict = Depends(get_current_user),
+):
+    """Erkennt Intent aus Text, speichert Ergebnis in Session."""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session nicht gefunden")
+    if session["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Kein Zugriff")
+
+    text = body.get("text", "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Kein Text angegeben")
+
+    from .llm_service import detect_intent
+    messages = list_messages(session_id)
+
+    try:
+        intent_result = detect_intent(
+            user_text=text,
+            available_flows=[],  # Sprint 3: echte Flows aus DB
+            conversation_history=messages,
+        )
+    except MistralError as e:
+        raise HTTPException(status_code=502, detail=f"LLM-Fehler: {e}")
+
+    # Intent in Session persistieren
+    update_session(session_id, {
+        "intent": intent_result["intent"],
+        "slots": {**session.get("slots", {}), **intent_result["slots"]},
+    })
+
+    # Antwort als Assistant-Nachricht speichern
+    reply = intent_result.get("clarification_question") or "Intent erkannt."
+    add_message(session_id, role="assistant", content=reply, metadata={"intent_result": intent_result})
+
+    return {
+        **intent_result,
+        "reply": reply,
+        "session_id": session_id,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Provider-Konfiguration (Admin)
+# ---------------------------------------------------------------------------
+
+class ProviderConfigIn(BaseModel):
+    api_key: Optional[str] = None
+    llm_model: Optional[str] = None
+    stt_model: Optional[str] = None
+    tts_model: Optional[str] = None
+
+
+@app.get("/api/admin/providers")
+def admin_list_providers(current_user: Dict = Depends(require_admin)):
+    return list_provider_configs()
+
+
+@app.get("/api/admin/providers/{name}")
+def admin_get_provider(name: str, current_user: Dict = Depends(require_admin)):
+    config = get_provider_config(name)
+    if config and config.get("api_key"):
+        config["api_key"] = "***"  # Key nicht im Klartext zurückgeben
+    return config or {}
+
+
+@app.put("/api/admin/providers/{name}")
+def admin_upsert_provider(
+    name: str,
+    body: ProviderConfigIn,
+    current_user: Dict = Depends(require_admin),
+):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=422, detail="Keine Felder angegeben")
+    config = upsert_provider_config(name, updates)
+    if config.get("api_key"):
+        config["api_key"] = "***"
+    log_event(
+        event_type="provider_config_updated",
+        actor_user_id=current_user["id"],
+        entity_type="provider",
+        entity_id=name,
+        details={"fields": list(updates.keys())},
+    )
+    return config
+
+
+# ---------------------------------------------------------------------------
 # System info
 # ---------------------------------------------------------------------------
+
+def _is_admin(user: Dict) -> bool:
+    return "ADMIN" in user.get("roles", []) or "OPERATOR" in user.get("roles", [])
+
 
 @app.get("/api/system/info")
 def system_info(current_user: Dict = Depends(require_admin)):
     return {
-        "version": "0.1.0",
+        "version": "0.2.0",
         "environment": __import__("app.config", fromlist=["ENVIRONMENT"]).ENVIRONMENT,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

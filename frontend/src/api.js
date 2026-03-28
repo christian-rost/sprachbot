@@ -42,3 +42,31 @@ export const listAuditLog = (params = {}) => {
 }
 
 export const getStats = () => request("GET", "/api/admin/stats")
+
+// Sessions
+export const startSession = () => request("POST", "/api/sessions")
+export const getSession = (id) => request("GET", `/api/sessions/${id}`)
+export const getMessages = (id) => request("GET", `/api/sessions/${id}/messages`)
+
+export const transcribeAudio = async (sessionId, blob, mimeType) => {
+  const token = getToken()
+  const form = new FormData()
+  const ext = mimeType.includes("ogg") ? "ogg" : mimeType.includes("mp4") ? "mp4" : "webm"
+  form.append("audio", blob, `audio.${ext}`)
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/transcribe`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  })
+  const data = await res.json().catch(() => ({ detail: res.statusText }))
+  if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`)
+  return data
+}
+
+export const detectIntent = (sessionId, text) =>
+  request("POST", `/api/sessions/${sessionId}/detect-intent`, { text })
+
+// Provider-Konfiguration (Admin)
+export const listProviders = () => request("GET", "/api/admin/providers")
+export const getProvider = (name) => request("GET", `/api/admin/providers/${name}`)
+export const upsertProvider = (name, data) => request("PUT", `/api/admin/providers/${name}`, data)

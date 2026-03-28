@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState } from "react"
 import {
   createUser,
+  detectIntent,
+  getMessages,
   getStats,
+  getSession,
   listAuditLog,
+  listProviders,
   listUsers,
   login,
   logout,
   me,
+  startSession,
+  transcribeAudio,
   updateUser,
+  upsertProvider,
 } from "./api"
+import VoiceRecorder from "./VoiceRecorder"
 
 // ---------------------------------------------------------------------------
 // Design tokens — xqt5 design system
@@ -202,28 +210,75 @@ function LoginView({ onLogin }) {
 }
 
 // ---------------------------------------------------------------------------
-// Voice view (user interface — Sprint 2+ for STT/TTS/WebSocket)
+// Voice view — Sprint 2: echte STT + Intent-Erkennung
 // ---------------------------------------------------------------------------
 
-function VoiceView({ user, onLogout }) {
+function VoiceView({ user, onLogout, onAdmin }) {
+  const [session, setSession] = useState(null)
   const [messages, setMessages] = useState([
-    { role: "assistant", text: "Wie kann ich Ihnen helfen?", ts: new Date().toISOString() },
+    { role: "assistant", content: "Wie kann ich Ihnen helfen?", id: "init" },
   ])
-  const [ttsEnabled, setTtsEnabled] = useState(true)
+  const [transcript, setTranscript] = useState("")
+  const [intentDebug, setIntentDebug] = useState(null)
+  const [error, setError] = useState("")
+  const [showDebug, setShowDebug] = useState(false)
   const chatRef = useRef(null)
+  const isAdmin = user.roles?.includes("ADMIN") || user.roles?.includes("OPERATOR")
+
+  useEffect(() => {
+    startSession().then(setSession).catch(e => setError(e.message))
+  }, [])
 
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight
   }, [messages])
 
-  const isAdmin = user.roles?.includes("ADMIN") || user.roles?.includes("OPERATOR")
+  async function handleTranscript(blob, mimeType) {
+    if (!session) throw new Error("Keine aktive Session")
+
+    setError("")
+    const result = await transcribeAudio(session.id, blob, mimeType)
+    const text = result.transcript
+
+    if (!text) {
+      setTranscript("(Kein Text erkannt)")
+      return
+    }
+    setTranscript(text)
+
+    // User-Nachricht anzeigen
+    setMessages(m => [...m, { id: result.session_id + Date.now(), role: "user", content: text }])
+
+    // Intent erkennen
+    const intentResult = await detectIntent(session.id, text)
+    setIntentDebug(intentResult)
+
+    // Bot-Antwort anzeigen
+    if (intentResult.reply) {
+      setMessages(m => [...m, {
+        id: "bot" + Date.now(),
+        role: "assistant",
+        content: intentResult.reply,
+      }])
+    }
+  }
+
+  async function handleReset() {
+    const s = await startSession()
+    setSession(s)
+    setMessages([{ role: "assistant", content: "Wie kann ich Ihnen helfen?", id: "init" }])
+    setTranscript("")
+    setIntentDebug(null)
+    setError("")
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, display: "flex", flexDirection: "column" }}>
       {/* Header */}
       <header style={{
-        background: C.sidebar, borderBottom: "none",
+        background: C.sidebar,
         padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between",
+        flexShrink: 0,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{
@@ -236,94 +291,82 @@ function VoiceView({ user, onLogout }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{user.username}</span>
           {isAdmin && (
-            <Btn small variant="outline" onClick={() => window.location.hash = "admin"}>
-              Admin
-            </Btn>
+            <Btn small variant="outline" onClick={onAdmin}>Admin</Btn>
           )}
+          <Btn small variant="outline" onClick={handleReset}>Neu starten</Btn>
           <Btn small variant="outline" onClick={onLogout}>Abmelden</Btn>
         </div>
       </header>
 
-      {/* Chat area */}
+      {/* Chat */}
       <div ref={chatRef} style={{
         flex: 1, overflowY: "auto", padding: "24px",
         display: "flex", flexDirection: "column", gap: 12,
         maxWidth: 720, width: "100%", margin: "0 auto",
       }}>
-        {messages.map((msg, i) => (
-          <div key={i} style={{
+        {messages.map(msg => (
+          <div key={msg.id} style={{
             display: "flex",
             justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
           }}>
             <div style={{
-              maxWidth: "75%",
-              padding: "10px 16px",
+              maxWidth: "75%", padding: "10px 16px",
               borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
               background: msg.role === "user" ? C.primary : C.surface,
               color: msg.role === "user" ? "#fff" : C.text,
               border: msg.role === "assistant" ? `1px solid ${C.border}` : "none",
-              fontSize: 14,
-              lineHeight: 1.5,
+              fontSize: 14, lineHeight: 1.5,
             }}>
-              {msg.text}
+              {msg.content}
             </div>
           </div>
         ))}
       </div>
 
       {/* Input area */}
-      <div style={{
-        background: C.surface, borderTop: `1px solid ${C.border}`,
-        padding: "20px 24px",
-      }}>
-        <div style={{
-          maxWidth: 720, margin: "0 auto",
-          display: "flex", flexDirection: "column", alignItems: "center", gap: 16,
-        }}>
-          {/* Transcript display */}
+      <div style={{ background: C.surface, borderTop: `1px solid ${C.border}`, padding: "20px 24px", flexShrink: 0 }}>
+        <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+          {/* Transkription */}
           <div style={{
-            width: "100%", minHeight: 36, padding: "8px 14px",
+            width: "100%", minHeight: 38, padding: "8px 14px",
             borderRadius: 8, background: C.bg, border: `1px solid ${C.border}`,
-            fontSize: 13, color: C.muted, textAlign: "center",
+            fontSize: 13, color: transcript ? C.text : C.muted, textAlign: "center",
           }}>
-            Transkription erscheint hier (verfügbar ab Sprint 2)
+            {transcript || "Transkription erscheint hier..."}
           </div>
 
-          {/* Mic button */}
-          <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-            <button
-              disabled
-              title="Spracherkennung wird in Sprint 2 implementiert"
-              style={{
-                width: 80, height: 80, borderRadius: "50%",
-                background: C.border, color: C.muted,
-                border: `3px solid ${C.primary}`,
-                cursor: "not-allowed",
-                fontSize: 28, display: "flex", alignItems: "center", justifyContent: "center",
-                boxShadow: "0 4px 16px rgba(238,127,0,0.2)",
-                opacity: 0.5,
-              }}
-            >
-              🎤
-            </button>
-          </div>
+          <ErrorBanner msg={error} />
 
-          {/* TTS toggle */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.muted }}>
-            <button
-              onClick={() => setTtsEnabled(!ttsEnabled)}
-              style={{
-                padding: "4px 12px", borderRadius: 20,
-                border: `1px solid ${C.border}`,
-                background: ttsEnabled ? C.primary + "15" : C.bg,
-                color: ttsEnabled ? C.primary : C.muted,
-                cursor: "pointer", fontSize: 12, fontWeight: 500,
-              }}
-            >
-              🔊 Sprachausgabe {ttsEnabled ? "ein" : "aus"}
-            </button>
-            <span style={{ fontSize: 11 }}>(TTS ab Sprint 3)</span>
-          </div>
+          <VoiceRecorder
+            onTranscript={handleTranscript}
+            onError={setError}
+            disabled={!session}
+          />
+
+          {/* Debug-Panel Toggle */}
+          <button
+            onClick={() => setShowDebug(d => !d)}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              fontSize: 12, color: C.muted,
+            }}
+          >
+            {showDebug ? "▲" : "▼"} Debug
+          </button>
+
+          {showDebug && intentDebug && (
+            <div style={{
+              width: "100%", padding: "12px 14px", borderRadius: 8,
+              background: "#1e1e2e", color: "#cdd6f4",
+              fontSize: 12, fontFamily: "monospace", textAlign: "left",
+              maxHeight: 200, overflowY: "auto",
+            }}>
+              <div style={{ color: "#a6e3a1", marginBottom: 4 }}>Intent-Erkennung</div>
+              <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+                {JSON.stringify(intentDebug, null, 2)}
+              </pre>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -870,5 +913,5 @@ export default function App() {
 
   if (view === "login" || !user) return <LoginView onLogin={handleLogin} />
   if (view === "admin") return <AdminView user={user} onLogout={handleLogout} onVoice={() => setView("voice")} />
-  return <VoiceView user={user} onLogout={handleLogout} />
+  return <VoiceView user={user} onLogout={handleLogout} onAdmin={() => setView("admin")} />
 }

@@ -35,7 +35,12 @@ from .session_storage import (
     update_session,
 )
 from .stt_service import transcribe, validate_audio
-from .tts_service import synthesize
+try:
+    from .tts_service import synthesize as _synthesize
+    def synthesize(text): return _synthesize(text)
+except Exception as _tts_import_err:
+    logger.warning("TTS nicht verfügbar: %s", _tts_import_err)
+    def synthesize(text): raise RuntimeError(f"TTS nicht verfügbar: {_tts_import_err}")
 from .user_storage import bootstrap_admin, create_user, list_users, update_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")

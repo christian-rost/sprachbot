@@ -5,7 +5,10 @@ Wählt automatisch eine verfügbare Stimme (bevorzugt Deutsch).
 import base64
 import logging
 
-from mistralai import Mistral
+try:
+    from mistralai import Mistral
+except ImportError:
+    from mistralai.client import Mistral
 
 from .config import MISTRAL_API_KEY, MISTRAL_TTS_MODEL, MISTRAL_TTS_VOICE
 

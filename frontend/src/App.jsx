@@ -599,6 +599,68 @@ function AuditSection() {
 // Admin — Dashboard section
 // ---------------------------------------------------------------------------
 
+function ProviderSection() {
+  const [apiKey, setApiKey] = useState("")
+  const [llmModel, setLlmModel] = useState("mistral-large-latest")
+  const [sttModel, setSttModel] = useState("mistral-stt-latest")
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    listProviders().catch(() => {})
+  }, [])
+
+  async function handleSave(e) {
+    e.preventDefault()
+    setSaving(true)
+    setError("")
+    setSaved(false)
+    try {
+      await upsertProvider("mistral", {
+        ...(apiKey ? { api_key: apiKey } : {}),
+        llm_model: llmModel,
+        stt_model: sttModel,
+      })
+      setSaved(true)
+      setApiKey("")
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 520 }}>
+      <h2 style={{ margin: "0 0 20px", fontSize: 18, color: C.text }}>Provider-Konfiguration</h2>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, color: C.text, marginBottom: 16 }}>Mistral AI</div>
+        <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <ErrorBanner msg={error} />
+          {saved && (
+            <div style={{ padding: "8px 12px", borderRadius: 6, background: "#d1fae5", color: "#065f46", fontSize: 13 }}>
+              Gespeichert
+            </div>
+          )}
+          <Input
+            label="API-Key (leer lassen um bestehenden zu behalten)"
+            type="password"
+            value={apiKey}
+            onChange={setApiKey}
+            placeholder="sk-..."
+          />
+          <Input label="LLM-Modell" value={llmModel} onChange={setLlmModel} />
+          <Input label="STT-Modell" value={sttModel} onChange={setSttModel} />
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Btn disabled={saving}>{saving ? "Speichern..." : "Speichern"}</Btn>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 function DashboardSection() {
   const [stats, setStats] = useState(null)
 
@@ -782,12 +844,11 @@ function AdminSidebar({ user, onLogout, onVoice, section, onSection }) {
 
 const TABS = [
   { id: "users",       label: "Benutzer" },
-  { id: "kosten",      label: "Kosten" },
-  { id: "statistiken", label: "Statistiken" },
-  { id: "retrieval",   label: "Retrieval" },
-  { id: "modelle",     label: "Modelle" },
+  { id: "sessions",    label: "Sessions" },
+  { id: "flows",       label: "Flows" },
   { id: "config",      label: "Provider" },
   { id: "audit",       label: "Audit-Logs" },
+  { id: "statistiken", label: "Statistiken" },
 ]
 
 function TabBar({ active, onChange }) {
@@ -830,10 +891,9 @@ function AdminView({ user, onLogout, onVoice }) {
       case "users":       return <UsersSection currentUser={user} />
       case "audit":       return <AuditSection />
       case "statistiken": return <DashboardSection />
-      case "kosten":      return <Placeholder sprint={4} feature="Kosten-Übersicht" />
-      case "retrieval":   return <Placeholder sprint={4} feature="Retrieval-Verwaltung" />
-      case "modelle":     return <Placeholder sprint={3} feature="Modell-Konfiguration" />
-      case "config":      return <Placeholder sprint={5} feature="Provider-Konfiguration" />
+      case "sessions":    return <Placeholder sprint={4} feature="Sessions-Übersicht" />
+      case "flows":       return <Placeholder sprint={3} feature="Flow-Verwaltung" />
+      case "config":      return <ProviderSection />
       default:            return null
     }
   }

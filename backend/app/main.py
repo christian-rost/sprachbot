@@ -452,17 +452,23 @@ async def process_session_turn(
     # 3. TTS
     import base64
     audio_b64 = None
+    tts_error = None
     try:
         audio_bytes = synthesize(reply)
         audio_b64 = base64.b64encode(audio_bytes).decode()
     except MistralError as e:
-        logger.warning("TTS fehlgeschlagen (non-fatal): %s", e)
+        tts_error = str(e)
+        logger.warning("TTS fehlgeschlagen: %s", e)
+    except Exception as e:
+        tts_error = str(e)
+        logger.warning("TTS unbekannter Fehler: %s", e)
 
     return {
         "transcript": transcript,
         "reply": reply,
         "audio_b64": audio_b64,
         "audio_format": "mp3",
+        "tts_error": tts_error,
         "intent": turn_result.get("intent"),
         "slots": turn_result.get("slots", {}),
         "action": turn_result.get("action"),

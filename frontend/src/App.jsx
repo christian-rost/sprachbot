@@ -249,6 +249,7 @@ function VoiceView({ user, onLogout, onAdmin }) {
 
       setTranscript(result.transcript)
       setDebugData(result)
+      if (result.tts_error) setShowDebug(true)
 
       // Nutzer-Nachricht anzeigen
       setMessages(m => [...m, {
@@ -270,6 +271,8 @@ function VoiceView({ user, onLogout, onAdmin }) {
       // TTS abspielen
       if (ttsEnabled && result.audio_b64) {
         playAudio(result.audio_b64, result.audio_format || "mp3")
+      } else if (result.tts_error) {
+        console.warn("TTS-Fehler:", result.tts_error)
       }
 
       // Session nach Abschluss neu starten
@@ -435,8 +438,13 @@ function VoiceView({ user, onLogout, onAdmin }) {
               width: "100%", padding: "12px 14px", borderRadius: 8,
               background: "#1e1e2e", color: "#cdd6f4",
               fontSize: 12, fontFamily: "monospace", textAlign: "left",
-              maxHeight: 200, overflowY: "auto",
+              maxHeight: 240, overflowY: "auto",
             }}>
+              {debugData.tts_error && (
+                <div style={{ color: "#f38ba8", marginBottom: 8, fontFamily: "sans-serif" }}>
+                  ⚠ TTS-Fehler: {debugData.tts_error}
+                </div>
+              )}
               <div style={{ color: "#a6e3a1", marginBottom: 4 }}>Turn-Result</div>
               <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>
                 {JSON.stringify(debugData, null, 2)}

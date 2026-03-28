@@ -52,7 +52,9 @@ def get_session(session_id: str) -> dict | None:
     if db:
         try:
             result = db.table(SESSIONS_TABLE).select("*").eq("id", session_id).execute()
-            return result.data[0] if result.data else None
+            if result.data:
+                return result.data[0]
+            # Nicht in Supabase → in-memory prüfen (z.B. wenn INSERT vorher fehlschlug)
         except Exception as e:
             logger.warning("Supabase session get fehlgeschlagen: %s", e)
 
@@ -66,7 +68,9 @@ def update_session(session_id: str, updates: dict) -> dict | None:
     if db:
         try:
             result = db.table(SESSIONS_TABLE).update(updates).eq("id", session_id).execute()
-            return result.data[0] if result.data else None
+            if result.data:
+                return result.data[0]
+            # Nicht in Supabase → in-memory versuchen
         except Exception as e:
             logger.warning("Supabase session update fehlgeschlagen: %s", e)
 

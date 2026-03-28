@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react"
 import {
+  createFlow,
   createUser,
   createWebhook,
+  deleteFlow,
   deleteWebhook,
+  getProvider,
   getStats,
   listAdminSessions,
   listAuditLog,
@@ -16,6 +19,7 @@ import {
   processAudio,
   startSession,
   testWebhook,
+  updateFlow,
   updateUser,
   updateWebhook,
   upsertProvider,
@@ -67,7 +71,7 @@ function Badge({ label, color }) {
   )
 }
 
-function Btn({ onClick, children, variant = "primary", disabled, small, style }) {
+function Btn({ onClick, children, variant = "primary", disabled, small, style, type = "submit" }) {
   const base = {
     display: "inline-flex",
     alignItems: "center",
@@ -91,7 +95,7 @@ function Btn({ onClick, children, variant = "primary", disabled, small, style })
     outline: { background: "transparent", color: C.primary, border: `1px solid ${C.primary}` },
   }
   return (
-    <button onClick={onClick} disabled={disabled} style={{ ...base, ...variants[variant] }}>
+    <button type={type} onClick={onClick} disabled={disabled} style={{ ...base, ...variants[variant] }}>
       {children}
     </button>
   )
@@ -136,15 +140,17 @@ function ErrorBanner({ msg }) {
   )
 }
 
-function Modal({ title, onClose, children }) {
+function Modal({ title, onClose, children, width = 440 }) {
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100,
+      overflowY: "auto", padding: "20px 0",
     }}>
       <div style={{
         background: C.surface, borderRadius: 10, padding: 28,
-        width: 440, maxWidth: "90vw", boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+        width, maxWidth: "95vw", boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+        margin: "auto",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <h3 style={{ margin: 0, fontSize: 16, color: C.text }}>{title}</h3>
@@ -606,7 +612,7 @@ function UsersSection({ currentUser }) {
             <Input label="E-Mail" type="email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} required />
             <Input label="Passwort" type="password" value={form.password} onChange={v => setForm(f => ({ ...f, password: v }))} required />
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
-              <Btn variant="ghost" onClick={() => setShowCreate(false)}>Abbrechen</Btn>
+              <Btn type="button" variant="ghost" onClick={() => setShowCreate(false)}>Abbrechen</Btn>
               <Btn>Erstellen</Btn>
             </div>
           </form>
@@ -693,25 +699,33 @@ function AuditSection() {
 function ProviderSection() {
   const [apiKey, setApiKey] = useState("")
   const [llmModel, setLlmModel] = useState("mistral-large-latest")
-  const [sttModel, setSttModel] = useState("mistral-stt-latest")
+  const [sttModel, setSttModel] = useState("voxtral-mini-latest")
+  const [ttsModel, setTtsModel] = useState("voxtral-mini-tts-2603")
+  const [ttsVoice, setTtsVoice] = useState("")
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState("")
 
   useEffect(() => {
-    listProviders().catch(() => {})
+    getProvider("mistral").then(cfg => {
+      if (!cfg) return
+      if (cfg.llm_model) setLlmModel(cfg.llm_model)
+      if (cfg.stt_model) setSttModel(cfg.stt_model)
+      if (cfg.tts_model) setTtsModel(cfg.tts_model)
+      if (cfg.tts_voice) setTtsVoice(cfg.tts_voice)
+    }).catch(() => {})
   }, [])
 
   async function handleSave(e) {
     e.preventDefault()
-    setSaving(true)
-    setError("")
-    setSaved(false)
+    setSaving(true); setError(""); setSaved(false)
     try {
       await upsertProvider("mistral", {
         ...(apiKey ? { api_key: apiKey } : {}),
         llm_model: llmModel,
         stt_model: sttModel,
+        tts_model: ttsModel,
+        ...(ttsVoice ? { tts_voice: ttsVoice } : {}),
       })
       setSaved(true)
       setApiKey("")
@@ -723,15 +737,16 @@ function ProviderSection() {
   }
 
   return (
-    <div style={{ maxWidth: 520 }}>
-      <h2 style={{ margin: "0 0 20px", fontSize: 18, color: C.text }}>Provider-Konfiguration</h2>
+    <div style={{ maxWidth: 560 }}>
       <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24 }}>
-        <div style={{ fontWeight: 600, fontSize: 14, color: C.text, marginBottom: 16 }}>Mistral AI</div>
-        <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ fontWeight: 600, fontSize: 15, color: C.text, marginBottom: 20, display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 20 }}>🤖</span> Mistral AI
+        </div>
+        <form onSubmit={handleSave} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <ErrorBanner msg={error} />
           {saved && (
             <div style={{ padding: "8px 12px", borderRadius: 6, background: "#d1fae5", color: "#065f46", fontSize: 13 }}>
-              Gespeichert
+              ✓ Konfiguration gespeichert
             </div>
           )}
           <Input
@@ -741,9 +756,21 @@ function ProviderSection() {
             onChange={setApiKey}
             placeholder="sk-..."
           />
-          <Input label="LLM-Modell" value={llmModel} onChange={setLlmModel} />
-          <Input label="STT-Modell" value={sttModel} onChange={setSttModel} />
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12 }}>Modelle</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <Input label="LLM-Modell" value={llmModel} onChange={setLlmModel} placeholder="mistral-large-latest" />
+              <Input label="STT-Modell" value={sttModel} onChange={setSttModel} placeholder="voxtral-mini-latest" />
+              <Input label="TTS-Modell" value={ttsModel} onChange={setTtsModel} placeholder="voxtral-mini-tts-2603" />
+              <Input
+                label="TTS-Stimme (leer = automatisch)"
+                value={ttsVoice}
+                onChange={setTtsVoice}
+                placeholder="leer lassen für automatische Auswahl"
+              />
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 4 }}>
             <Btn disabled={saving}>{saving ? "Speichern..." : "Speichern"}</Btn>
           </div>
         </form>
@@ -754,34 +781,67 @@ function ProviderSection() {
 
 function DashboardSection() {
   const [stats, setStats] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    getStats().then(setStats).catch(() => {})
+    getStats().then(setStats).catch(() => {}).finally(() => setLoading(false))
   }, [])
 
   const tiles = [
-    { label: "Aktive Sessions", value: stats?.active_sessions ?? "—", icon: "💬" },
-    { label: "Sessions heute", value: stats?.sessions_today ?? "—", icon: "📊" },
-    { label: "Erfolgsrate", value: stats ? `${(stats.success_rate * 100).toFixed(0)}%` : "—", icon: "✅" },
-    { label: "Fehlerrate", value: stats ? `${(stats.error_rate * 100).toFixed(0)}%` : "—", icon: "⚠️" },
+    { label: "Aktive Sessions", value: stats?.active_sessions ?? "—", icon: "💬", color: C.success },
+    { label: "Sessions heute", value: stats?.sessions_today ?? "—", icon: "📅", color: C.primary },
+    { label: "Sessions gesamt", value: stats?.total_sessions ?? "—", icon: "📊", color: C.text },
+    { label: "Abgeschlossen", value: stats?.completed_sessions ?? "—", icon: "✅", color: C.success },
+    { label: "Erfolgsrate", value: stats ? `${(stats.success_rate * 100).toFixed(0)}%` : "—", icon: "📈", color: stats?.success_rate > 0.7 ? C.success : C.warning },
   ]
 
   return (
     <div>
-      <h2 style={{ margin: "0 0 20px", fontSize: 18, color: C.text }}>Dashboard</h2>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16, marginBottom: 32 }}>
-        {tiles.map(t => (
-          <div key={t.label} style={{
-            background: C.surface, borderRadius: 10, padding: 20,
-            border: `1px solid ${C.border}`, boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-          }}>
-            <div style={{ fontSize: 24, marginBottom: 8 }}>{t.icon}</div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: C.text }}>{t.value}</div>
-            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{t.label}</div>
+      {loading ? (
+        <p style={{ color: C.muted }}>Lade...</p>
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 16, marginBottom: 32 }}>
+            {tiles.map(t => (
+              <div key={t.label} style={{
+                background: C.surface, borderRadius: 10, padding: 20,
+                border: `1px solid ${C.border}`, boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+              }}>
+                <div style={{ fontSize: 22, marginBottom: 8 }}>{t.icon}</div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: t.color }}>{t.value}</div>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{t.label}</div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <Placeholder sprint={5} feature="Grafiken & Verlaufsdiagramme" />
+
+          {stats?.top_intents?.length > 0 && (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 24 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 16 }}>Top Intents</div>
+              {stats.top_intents.map((item, i) => {
+                const max = stats.top_intents[0].count
+                return (
+                  <div key={item.intent} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                    <div style={{ width: 20, fontSize: 12, color: C.muted, textAlign: "right" }}>{i + 1}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 13, color: C.text }}>{item.intent}</span>
+                        <span style={{ fontSize: 12, color: C.muted }}>{item.count}</span>
+                      </div>
+                      <div style={{ height: 6, background: C.border, borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{
+                          height: "100%", borderRadius: 3,
+                          background: C.primary,
+                          width: `${(item.count / max) * 100}%`,
+                        }} />
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
@@ -859,23 +919,342 @@ function SessionsSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Admin — Flow Modal (create / edit)
+// ---------------------------------------------------------------------------
+
+const SLOT_TYPES = ["string", "email", "boolean", "enum"]
+
+function emptySlot() {
+  return { name: "", type: "string", required: true, question: "", values: "", min_length: 1, max_length: 500 }
+}
+
+function FlowModal({ flow, webhooks, onClose, onSave }) {
+  const isEdit = !!flow?.id
+  const def = flow?.definition || {}
+
+  const [tab, setTab] = useState("basic")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  // Basic
+  const [name, setName] = useState(flow?.name || "")
+  const [intentName, setIntentName] = useState(flow?.intent_name || "")
+  const [description, setDescription] = useState(flow?.description || "")
+  const [priority, setPriority] = useState(String(flow?.priority ?? 0))
+  const [maxTurns, setMaxTurns] = useState(String(def.max_turns ?? 10))
+  const [isActive, setIsActive] = useState(flow?.is_active !== false)
+
+  // Slots
+  const [slots, setSlots] = useState(() => {
+    const entries = Object.entries(def.slots || {})
+    if (entries.length === 0) return [emptySlot()]
+    return entries.map(([sName, sDef]) => ({
+      name: sName,
+      type: sDef.type || "string",
+      required: sDef.required !== false,
+      question: sDef.question || "",
+      values: Array.isArray(sDef.values) ? sDef.values.join(", ") : (sDef.values || ""),
+      min_length: sDef.min_length ?? 1,
+      max_length: sDef.max_length ?? 500,
+    }))
+  })
+
+  // Messages
+  const [confirmation, setConfirmation] = useState(def.confirmation || "")
+  const [successMsg, setSuccessMsg] = useState(def.success_message || "Ihre Anfrage wurde erfolgreich ausgeführt.")
+
+  // Action
+  const [actionType, setActionType] = useState(def.action?.type || "none")
+  const [webhookId, setWebhookId] = useState(def.action?.webhook_id || "")
+  const [payloadTemplate, setPayloadTemplate] = useState(
+    def.action?.payload_template ? JSON.stringify(def.action.payload_template, null, 2) : ""
+  )
+
+  function updateSlot(idx, field, value) {
+    setSlots(s => s.map((sl, i) => i === idx ? { ...sl, [field]: value } : sl))
+  }
+  function addSlot() { setSlots(s => [...s, emptySlot()]) }
+  function removeSlot(idx) { setSlots(s => s.filter((_, i) => i !== idx)) }
+
+  function buildDefinition() {
+    const slotDefs = {}
+    for (const sl of slots) {
+      if (!sl.name.trim()) continue
+      const d = { type: sl.type, required: sl.required, question: sl.question }
+      if (sl.type === "enum") d.values = sl.values.split(",").map(v => v.trim()).filter(Boolean)
+      if (sl.type === "string") { d.min_length = Number(sl.min_length); d.max_length = Number(sl.max_length) }
+      slotDefs[sl.name.trim()] = d
+    }
+    const action = { type: actionType }
+    if (actionType === "webhook") {
+      action.webhook_id = webhookId
+      if (payloadTemplate.trim()) {
+        try { action.payload_template = JSON.parse(payloadTemplate) } catch (_) {}
+      }
+    }
+    return {
+      slots: slotDefs,
+      ...(confirmation.trim() ? { confirmation: confirmation.trim() } : {}),
+      success_message: successMsg,
+      max_turns: Number(maxTurns) || 10,
+      action,
+    }
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!name.trim() || !intentName.trim()) { setError("Name und Intent sind Pflichtfelder."); return }
+    setSaving(true); setError("")
+    try {
+      const data = {
+        name: name.trim(),
+        intent_name: intentName.trim(),
+        description: description.trim(),
+        priority: Number(priority) || 0,
+        is_active: isActive,
+        definition: buildDefinition(),
+      }
+      await onSave(isEdit ? flow.id : null, data)
+      onClose()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const tabStyle = (t) => ({
+    padding: "8px 14px", border: "none", background: "transparent",
+    cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 600 : 400,
+    color: tab === t ? C.primary : C.muted,
+    borderBottom: tab === t ? `2px solid ${C.primary}` : "2px solid transparent",
+    marginBottom: -1,
+  })
+
+  const slotNames = slots.filter(s => s.name.trim()).map(s => `{{${s.name}}}`)
+
+  return (
+    <Modal title={isEdit ? `Flow bearbeiten: ${flow.name}` : "Flow erstellen"} onClose={onClose} width={680}>
+      <div style={{ borderBottom: `1px solid ${C.border}`, display: "flex", marginBottom: 20 }}>
+        {[["basic", "Allgemein"], ["slots", `Slots (${slots.filter(s=>s.name).length})`], ["messages", "Nachrichten"], ["action", "Aktion"]].map(([id, label]) => (
+          <button key={id} style={tabStyle(id)} onClick={() => setTab(id)}>{label}</button>
+        ))}
+      </div>
+
+      <ErrorBanner msg={error} />
+
+      <form onSubmit={handleSubmit}>
+        {tab === "basic" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ flex: 2 }}><Input label="Name *" value={name} onChange={setName} placeholder="Passwort zurücksetzen" /></div>
+              <div style={{ flex: 1 }}><Input label="Priorität" value={priority} onChange={setPriority} type="number" /></div>
+            </div>
+            <Input label="Intent-Name *" value={intentName} onChange={setIntentName} placeholder="passwort_reset" />
+            <Input label="Beschreibung" value={description} onChange={setDescription} />
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ flex: 1 }}><Input label="Max. Turns" value={maxTurns} onChange={setMaxTurns} type="number" /></div>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{ fontSize: 13, fontWeight: 500, color: C.text }}>Status</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 8 }}>
+                  <Toggle checked={isActive} onChange={setIsActive} />
+                  <span style={{ fontSize: 13, color: C.muted }}>{isActive ? "Aktiv" : "Inaktiv"}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "slots" && (
+          <div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>
+              Slots werden in der definierten Reihenfolge abgefragt.
+            </div>
+            {slots.map((sl, idx) => (
+              <div key={idx} style={{
+                border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, marginBottom: 10,
+                background: C.bg,
+              }}>
+                <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+                  <div style={{ flex: 2 }}>
+                    <Input label="Slot-Name" value={sl.name} onChange={v => updateSlot(idx, "name", v)} placeholder="benutzername" small />
+                  </div>
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ fontSize: 12, fontWeight: 500, color: C.text }}>Typ</label>
+                    <select
+                      value={sl.type}
+                      onChange={e => updateSlot(idx, "type", e.target.value)}
+                      style={{ padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 13 }}
+                    >
+                      {SLOT_TYPES.map(t => <option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                    <label style={{ fontSize: 12, fontWeight: 500, color: C.text }}>Pflicht</label>
+                    <div style={{ paddingTop: 8 }}>
+                      <Toggle checked={sl.required} onChange={v => updateSlot(idx, "required", v)} />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeSlot(idx)}
+                    style={{ alignSelf: "flex-end", padding: "6px 10px", border: "none", borderRadius: 6, background: "#fee2e2", color: C.error, cursor: "pointer", fontSize: 13 }}
+                  >✕</button>
+                </div>
+                <Input label="Frage" value={sl.question} onChange={v => updateSlot(idx, "question", v)} placeholder="Wie lautet Ihr Benutzername?" small />
+                {sl.type === "enum" && (
+                  <div style={{ marginTop: 8 }}>
+                    <Input label="Erlaubte Werte (kommagetrennt)" value={sl.values} onChange={v => updateSlot(idx, "values", v)} placeholder="Option1, Option2, Option3" small />
+                  </div>
+                )}
+                {sl.type === "string" && (
+                  <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                    <Input label="Min. Länge" value={String(sl.min_length)} onChange={v => updateSlot(idx, "min_length", v)} type="number" small />
+                    <Input label="Max. Länge" value={String(sl.max_length)} onChange={v => updateSlot(idx, "max_length", v)} type="number" small />
+                  </div>
+                )}
+              </div>
+            ))}
+            <Btn type="button" variant="ghost" small onClick={addSlot}>+ Slot hinzufügen</Btn>
+          </div>
+        )}
+
+        {tab === "messages" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {slotNames.length > 0 && (
+              <div style={{ padding: "8px 12px", background: C.bg, borderRadius: 6, fontSize: 12, color: C.muted }}>
+                Verfügbare Platzhalter: {slotNames.join("  ")}
+              </div>
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: 13, fontWeight: 500, color: C.text }}>
+                Bestätigungsfrage <span style={{ fontWeight: 400, color: C.muted }}>(optional)</span>
+              </label>
+              <textarea
+                value={confirmation}
+                onChange={e => setConfirmation(e.target.value)}
+                placeholder="Soll ich das Passwort für {{benutzername}} zurücksetzen?"
+                rows={3}
+                style={{ padding: "8px 12px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 14, resize: "vertical" }}
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: 13, fontWeight: 500, color: C.text }}>Erfolgsmeldung</label>
+              <textarea
+                value={successMsg}
+                onChange={e => setSuccessMsg(e.target.value)}
+                rows={3}
+                style={{ padding: "8px 12px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 14, resize: "vertical" }}
+              />
+            </div>
+          </div>
+        )}
+
+        {tab === "action" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: 13, fontWeight: 500, color: C.text }}>Aktionstyp</label>
+              <select
+                value={actionType}
+                onChange={e => setActionType(e.target.value)}
+                style={{ padding: "8px 12px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 14 }}
+              >
+                <option value="none">Keine Aktion</option>
+                <option value="webhook">Webhook ausführen</option>
+              </select>
+            </div>
+            {actionType === "webhook" && (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label style={{ fontSize: 13, fontWeight: 500, color: C.text }}>Webhook</label>
+                  <select
+                    value={webhookId}
+                    onChange={e => setWebhookId(e.target.value)}
+                    style={{ padding: "8px 12px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 14 }}
+                  >
+                    <option value="">— Webhook wählen —</option>
+                    {(webhooks || []).map(wh => (
+                      <option key={wh.id} value={wh.id}>{wh.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <label style={{ fontSize: 13, fontWeight: 500, color: C.text }}>
+                    Payload-Template <span style={{ fontWeight: 400, color: C.muted }}>(JSON, optional)</span>
+                  </label>
+                  {slotNames.length > 0 && (
+                    <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>
+                      Platzhalter: {slotNames.join("  ")}
+                    </div>
+                  )}
+                  <textarea
+                    value={payloadTemplate}
+                    onChange={e => setPayloadTemplate(e.target.value)}
+                    placeholder={'{\n  "user": "{{benutzername}}",\n  "email": "{{email}}"\n}'}
+                    rows={6}
+                    style={{ padding: "8px 12px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 13, fontFamily: "monospace", resize: "vertical" }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 24, paddingTop: 16, borderTop: `1px solid ${C.border}` }}>
+          <Btn type="button" variant="ghost" onClick={onClose}>Abbrechen</Btn>
+          <Btn disabled={saving}>{saving ? "Speichern..." : (isEdit ? "Speichern" : "Erstellen")}</Btn>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Admin — Flows section
 // ---------------------------------------------------------------------------
 
 function FlowsSection() {
   const [flows, setFlows] = useState([])
+  const [webhooks, setWebhooks] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [editFlow, setEditFlow] = useState(null)   // null = closed, false = create new, flow obj = edit
+  const [showModal, setShowModal] = useState(false)
 
-  useEffect(() => {
-    listFlows()
-      .then(setFlows)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [])
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    try {
+      const [f, w] = await Promise.all([listFlows(), listWebhooks()])
+      setFlows(f); setWebhooks(w)
+    } catch (e) { setError(e.message) }
+    setLoading(false)
+  }
+
+  async function handleSave(flowId, data) {
+    if (flowId) {
+      await updateFlow(flowId, data)
+    } else {
+      await createFlow(data)
+    }
+    await load()
+  }
+
+  async function handleDelete(id, name) {
+    if (!confirm(`Flow "${name}" wirklich löschen?`)) return
+    try { await deleteFlow(id); await load() } catch (e) { setError(e.message) }
+  }
+
+  async function handleToggle(f) {
+    try { await updateFlow(f.id, { is_active: !f.is_active }); await load() } catch (e) { setError(e.message) }
+  }
 
   return (
     <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+        <Btn small onClick={() => { setEditFlow(false); setShowModal(true) }}>+ Flow erstellen</Btn>
+      </div>
       <ErrorBanner msg={error} />
       {loading ? (
         <p style={{ color: C.muted }}>Lade...</p>
@@ -884,36 +1263,59 @@ function FlowsSection() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: C.bg, borderBottom: `1px solid ${C.border}` }}>
-                {["Name", "Intent", "Slots", "Aktiv", "Priorität"].map(h => (
+                {["Name", "Intent", "Slots", "Aktion", "Aktiv", "Aktionen"].map(h => (
                   <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: C.muted }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {flows.length === 0 ? (
-                <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: C.muted }}>Keine Flows</td></tr>
-              ) : flows.map(f => (
-                <tr key={f.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                  <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 500, color: C.text }}>{f.name}</td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <Badge label={f.intent_name} color={C.primary} />
-                  </td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: C.muted }}>
-                    {Object.keys(f.definition?.slots || {}).join(", ") || "—"}
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <Badge label={f.is_active ? "Aktiv" : "Inaktiv"} color={f.is_active ? C.success : C.muted} />
-                  </td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: C.muted }}>{f.priority ?? 0}</td>
-                </tr>
-              ))}
+                <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: C.muted }}>Keine Flows konfiguriert</td></tr>
+              ) : flows.map(f => {
+                const slotCount = Object.keys(f.definition?.slots || {}).length
+                const actionType = f.definition?.action?.type || "none"
+                const wh = webhooks.find(w => w.id === f.definition?.action?.webhook_id)
+                return (
+                  <tr key={f.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ padding: "12px 16px" }}>
+                      <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{f.name}</div>
+                      {f.description && <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{f.description}</div>}
+                    </td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <Badge label={f.intent_name} color={C.primary} />
+                    </td>
+                    <td style={{ padding: "12px 16px", fontSize: 13, color: C.muted }}>
+                      {slotCount === 0 ? "—" : `${slotCount} Slot${slotCount !== 1 ? "s" : ""}`}
+                    </td>
+                    <td style={{ padding: "12px 16px", fontSize: 13, color: C.muted }}>
+                      {actionType === "webhook" ? (
+                        <span title={wh?.name}><Badge label="Webhook" color={C.success} /></span>
+                      ) : "—"}
+                    </td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <Toggle checked={f.is_active} onChange={() => handleToggle(f)} />
+                    </td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <Btn small variant="ghost" onClick={() => { setEditFlow(f); setShowModal(true) }}>Bearbeiten</Btn>
+                        <Btn small variant="danger" onClick={() => handleDelete(f.id, f.name)}>Löschen</Btn>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       )}
-      <div style={{ marginTop: 16 }}>
-        <Placeholder sprint={5} feature="Flow-Editor (Slots, Bestätigung, Webhook-Verknüpfung)" />
-      </div>
+      {showModal && (
+        <FlowModal
+          flow={editFlow || undefined}
+          webhooks={webhooks}
+          onClose={() => { setShowModal(false); setEditFlow(null) }}
+          onSave={handleSave}
+        />
+      )}
     </div>
   )
 }
@@ -1053,7 +1455,7 @@ function WebhooksSection() {
               />
             )}
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
-              <Btn variant="ghost" onClick={() => setShowCreate(false)}>Abbrechen</Btn>
+              <Btn type="button" variant="ghost" onClick={() => setShowCreate(false)}>Abbrechen</Btn>
               <Btn>Erstellen</Btn>
             </div>
           </form>

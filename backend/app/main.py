@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -244,13 +245,27 @@ def admin_audit_log(
 
 @app.get("/api/admin/stats")
 def admin_stats(current_user: Dict = Depends(require_admin_or_operator)):
+    sessions = list_sessions(limit=1000)
+    today_str = datetime.now(timezone.utc).date().isoformat()
+
+    active = sum(1 for s in sessions if s.get("status") == "active")
+    today_count = sum(1 for s in sessions if (s.get("created_at") or "")[:10] == today_str)
+    completed = sum(1 for s in sessions if s.get("status") == "completed")
+    terminal = sum(1 for s in sessions if s.get("status") in {"completed", "abandoned", "cancelled", "timeout"})
+    success_rate = round(completed / terminal, 3) if terminal > 0 else 0.0
+
+    intents = [s["intent"] for s in sessions if s.get("intent")]
+    top_intents = [{"intent": k, "count": v} for k, v in Counter(intents).most_common(5)]
+
     return {
-        "active_sessions": 0,
-        "sessions_today": 0,
-        "success_rate": 0.0,
+        "active_sessions": active,
+        "sessions_today": today_count,
+        "total_sessions": len(sessions),
+        "completed_sessions": completed,
+        "success_rate": success_rate,
         "error_rate": 0.0,
         "avg_latency_ms": 0,
-        "top_intents": [],
+        "top_intents": top_intents,
     }
 
 
@@ -601,6 +616,7 @@ class ProviderConfigIn(BaseModel):
     llm_model: Optional[str] = None
     stt_model: Optional[str] = None
     tts_model: Optional[str] = None
+    tts_voice: Optional[str] = None
 
 
 @app.get("/api/admin/providers")

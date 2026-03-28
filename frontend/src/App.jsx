@@ -11,23 +11,25 @@ import {
 } from "./api"
 
 // ---------------------------------------------------------------------------
-// Design tokens
+// Design tokens — xqt5 design system
 // ---------------------------------------------------------------------------
 const C = {
-  primary: "#4f46e5",
-  primaryHover: "#4338ca",
-  bg: "#f9fafb",
+  primary: "#ee7f00",
+  primaryHover: "#cc6d00",
+  sidebar: "#213452",
+  sidebarHover: "#2d4263",
+  bg: "#f5f5f5",
   surface: "#ffffff",
-  border: "#e5e7eb",
+  border: "#e0e0e0",
   text: "#111827",
-  muted: "#6b7280",
+  muted: "#888888",
   error: "#ef4444",
   success: "#10b981",
   warning: "#f59e0b",
 }
 
 const ROLE_COLORS = {
-  ADMIN: "#4f46e5",
+  ADMIN: "#ee7f00",
   OPERATOR: "#0891b2",
   USER: "#059669",
   GUEST: "#9ca3af",
@@ -74,6 +76,7 @@ function Btn({ onClick, children, variant = "primary", disabled, small, style })
     secondary: { background: C.border, color: C.text },
     danger: { background: "#fee2e2", color: C.error },
     ghost: { background: "transparent", color: C.muted, border: `1px solid ${C.border}` },
+    outline: { background: "transparent", color: C.primary, border: `1px solid ${C.primary}` },
   }
   return (
     <button onClick={onClick} disabled={disabled} style={{ ...base, ...variants[variant] }}>
@@ -168,15 +171,20 @@ function LoginView({ onLogin }) {
 
   return (
     <div style={{
-      minHeight: "100vh", background: C.bg,
+      minHeight: "100vh", background: C.sidebar,
       display: "flex", alignItems: "center", justifyContent: "center",
     }}>
       <div style={{
         background: C.surface, borderRadius: 12, padding: 40,
-        width: 380, boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
+        width: 380, boxShadow: "0 8px 32px rgba(0,0,0,0.24)",
       }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🎤</div>
+          <div style={{
+            width: 56, height: 56, borderRadius: "50%",
+            background: C.primary, color: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 24, margin: "0 auto 16px",
+          }}>🎤</div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: C.text }}>Sprachbot</h1>
           <p style={{ margin: "6px 0 0", color: C.muted, fontSize: 14 }}>Melden Sie sich an</p>
         </div>
@@ -214,21 +222,25 @@ function VoiceView({ user, onLogout }) {
     <div style={{ minHeight: "100vh", background: C.bg, display: "flex", flexDirection: "column" }}>
       {/* Header */}
       <header style={{
-        background: C.surface, borderBottom: `1px solid ${C.border}`,
+        background: C.sidebar, borderBottom: "none",
         padding: "12px 24px", display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 20 }}>🎤</span>
-          <span style={{ fontWeight: 700, fontSize: 16, color: C.text }}>Sprachbot</span>
+          <div style={{
+            width: 28, height: 28, borderRadius: "50%",
+            background: C.primary, display: "flex", alignItems: "center",
+            justifyContent: "center", fontSize: 14,
+          }}>🎤</div>
+          <span style={{ fontWeight: 700, fontSize: 16, color: "#ffffff" }}>Sprachbot</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 13, color: C.muted }}>{user.username}</span>
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{user.username}</span>
           {isAdmin && (
-            <Btn small variant="ghost" onClick={() => window.location.hash = "admin"}>
+            <Btn small variant="outline" onClick={() => window.location.hash = "admin"}>
               Admin
             </Btn>
           )}
-          <Btn small variant="ghost" onClick={onLogout}>Abmelden</Btn>
+          <Btn small variant="outline" onClick={onLogout}>Abmelden</Btn>
         </div>
       </header>
 
@@ -285,9 +297,11 @@ function VoiceView({ user, onLogout }) {
               style={{
                 width: 80, height: 80, borderRadius: "50%",
                 background: C.border, color: C.muted,
-                border: "none", cursor: "not-allowed",
+                border: `3px solid ${C.primary}`,
+                cursor: "not-allowed",
                 fontSize: 28, display: "flex", alignItems: "center", justifyContent: "center",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+                boxShadow: "0 4px 16px rgba(238,127,0,0.2)",
+                opacity: 0.5,
               }}
             >
               🎤
@@ -628,17 +642,20 @@ function AdminView({ user, onLogout, onVoice }) {
     <div style={{ minHeight: "100vh", background: C.bg, display: "flex" }}>
       {/* Sidebar */}
       <aside style={{
-        width: 220, background: C.surface,
-        borderRight: `1px solid ${C.border}`,
+        width: 220, background: C.sidebar,
         display: "flex", flexDirection: "column",
         position: "fixed", top: 0, bottom: 0, left: 0,
       }}>
-        <div style={{ padding: "20px 16px", borderBottom: `1px solid ${C.border}` }}>
+        <div style={{ padding: "20px 16px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 18 }}>🎤</span>
+            <div style={{
+              width: 32, height: 32, borderRadius: "50%",
+              background: C.primary, display: "flex", alignItems: "center",
+              justifyContent: "center", fontSize: 16, flexShrink: 0,
+            }}>🎤</div>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Sprachbot</div>
-              <div style={{ fontSize: 11, color: C.muted }}>Admin</div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#ffffff" }}>Sprachbot</div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>Admin</div>
             </div>
           </div>
         </div>
@@ -652,10 +669,11 @@ function AdminView({ user, onLogout, onVoice }) {
                 width: "100%", padding: "9px 12px",
                 borderRadius: 6, border: "none", cursor: "pointer",
                 display: "flex", alignItems: "center", gap: 10,
-                background: section === item.id ? C.primary + "15" : "transparent",
-                color: section === item.id ? C.primary : C.muted,
+                background: section === item.id ? "rgba(255,255,255,0.1)" : "transparent",
+                color: section === item.id ? "#ffffff" : "rgba(255,255,255,0.55)",
                 fontSize: 13, fontWeight: section === item.id ? 600 : 400,
                 marginBottom: 2,
+                borderLeft: section === item.id ? `3px solid ${C.primary}` : "3px solid transparent",
               }}
             >
               <span>{item.icon}</span>
@@ -664,8 +682,8 @@ function AdminView({ user, onLogout, onVoice }) {
           ))}
         </nav>
 
-        <div style={{ padding: "12px 8px", borderTop: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 12, color: C.muted, padding: "4px 12px", marginBottom: 4 }}>
+        <div style={{ padding: "12px 8px", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", padding: "4px 12px", marginBottom: 4 }}>
             {user.username}
           </div>
           <button
@@ -673,7 +691,7 @@ function AdminView({ user, onLogout, onVoice }) {
             style={{
               width: "100%", padding: "9px 12px", borderRadius: 6, border: "none",
               cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
-              background: "transparent", color: C.muted, fontSize: 13, marginBottom: 2,
+              background: "transparent", color: "rgba(255,255,255,0.55)", fontSize: 13, marginBottom: 2,
             }}
           >
             🎤 Sprachinterface
@@ -683,7 +701,7 @@ function AdminView({ user, onLogout, onVoice }) {
             style={{
               width: "100%", padding: "9px 12px", borderRadius: 6, border: "none",
               cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
-              background: "transparent", color: C.muted, fontSize: 13,
+              background: "transparent", color: "rgba(255,255,255,0.55)", fontSize: 13,
             }}
           >
             ← Abmelden

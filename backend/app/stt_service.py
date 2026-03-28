@@ -24,7 +24,7 @@ ALLOWED_EXTENSIONS = {".wav", ".webm", ".ogg", ".mp3", ".mp4", ".m4a"}
 MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
 
 # Fallback-Modell falls nicht konfiguriert
-_DEFAULT_STT_MODEL = "mistral-stt-latest"
+_DEFAULT_STT_MODEL = "voxtral-mini-latest"
 
 
 def validate_audio(data: bytes, content_type: str | None, filename: str | None) -> None:
@@ -74,7 +74,6 @@ def transcribe(
         data={
             "model": model,
             "language": language,
-            "response_format": "json",
         },
     )
 

@@ -217,7 +217,7 @@ function VoiceView({ user, onLogout, onAdmin }) {
   ])
   const [transcript, setTranscript] = useState("")
   const [processing, setProcessing] = useState(false)
-  const [ttsEnabled, setTtsEnabled] = useState(true)
+  const [ttsEnabled, setTtsEnabled] = useState(false)
   const [debugData, setDebugData] = useState(null)
   const [showDebug, setShowDebug] = useState(false)
   const [error, setError] = useState("")

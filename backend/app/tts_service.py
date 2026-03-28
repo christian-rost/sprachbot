@@ -4,13 +4,13 @@ Response ist Raw-Audio-Bytes (kein JSON), voice-Parameter ist Pflichtfeld.
 """
 import logging
 
-from .config import MISTRAL_TTS_MODEL
+from .config import MISTRAL_TTS_MODEL, MISTRAL_TTS_VOICE
 from .mistral_client import MistralError, mistral_post_stream
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TTS_MODEL = "voxtral-mini-tts-2603"
-_DEFAULT_VOICE = "casual_male"
+_DEFAULT_VOICE = "Christian"
 _DEFAULT_FORMAT = "mp3"
 
 # Einfaches In-Process-Cache (Text → Audio-Bytes)
@@ -20,7 +20,7 @@ _MAX_CACHE = 100
 
 def synthesize(
     text: str,
-    voice: str = _DEFAULT_VOICE,
+    voice: str | None = None,
     response_format: str = _DEFAULT_FORMAT,
 ) -> bytes:
     """
@@ -32,6 +32,7 @@ def synthesize(
     if not text or not text.strip():
         raise ValueError("Kein Text für TTS angegeben")
 
+    voice = voice or MISTRAL_TTS_VOICE or _DEFAULT_VOICE
     cache_key = f"{voice}:{response_format}:{text[:200]}"
     if cache_key in _cache:
         logger.debug("TTS: Cache-Treffer")

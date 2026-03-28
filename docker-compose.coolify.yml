@@ -1,0 +1,34 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      PORT: ${PORT:-8000}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_KEY: ${SUPABASE_KEY}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_LLM_MODEL: ${MISTRAL_LLM_MODEL:-mistral-large-latest}
+      MISTRAL_STT_MODEL: ${MISTRAL_STT_MODEL:-}
+      MISTRAL_TTS_MODEL: ${MISTRAL_TTS_MODEL:-}
+      PROVIDER_KEY_ENCRYPTION_KEY: ${PROVIDER_KEY_ENCRYPTION_KEY:-}
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE}
+    expose:
+      - "80"
+    depends_on:
+      - backend
+    restart: unless-stopped

@@ -339,7 +339,7 @@ function UsersSection({ currentUser }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [showCreate, setShowCreate] = useState(false)
-  const [editUser, setEditUser] = useState(null)
+  const [showInactive, setShowInactive] = useState(false)
   const [form, setForm] = useState({ username: "", email: "", password: "", roles: ["USER"] })
 
   useEffect(() => { load() }, [])
@@ -360,70 +360,102 @@ function UsersSection({ currentUser }) {
     } catch (e) { setError(e.message) }
   }
 
-  async function handleUpdate(e) {
-    e.preventDefault()
+  async function toggleActive(u) {
     try {
-      await updateUser(editUser.id, { roles: editUser.roles, is_active: editUser.is_active })
-      setEditUser(null)
+      await updateUser(u.id, { is_active: !u.is_active })
       await load()
     } catch (e) { setError(e.message) }
   }
 
-  async function toggleActive(user) {
+  async function toggleAdmin(u) {
+    const isAdmin = u.roles.includes("ADMIN")
+    const newRoles = isAdmin
+      ? u.roles.filter(r => r !== "ADMIN")
+      : [...u.roles.filter(r => r !== "USER"), "ADMIN"]
     try {
-      await updateUser(user.id, { is_active: !user.is_active })
+      await updateUser(u.id, { roles: newRoles })
       await load()
     } catch (e) { setError(e.message) }
   }
 
-  const ROLE_OPTIONS = ["ADMIN", "OPERATOR", "USER", "GUEST"]
+  const visible = showInactive ? users : users.filter(u => u.is_active)
+
+  const TH = ({ children }) => (
+    <th style={{
+      padding: "10px 16px", textAlign: "left", fontSize: 13,
+      fontWeight: 600, color: C.text, background: C.bg,
+      borderBottom: `1px solid ${C.border}`,
+    }}>{children}</th>
+  )
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <h2 style={{ margin: 0, fontSize: 18, color: C.text }}>Benutzerverwaltung</h2>
-        <Btn onClick={() => setShowCreate(true)}>+ Benutzer erstellen</Btn>
-      </div>
-
       <ErrorBanner msg={error} />
+
+      {/* Deaktivierte anzeigen */}
+      <label style={{
+        display: "flex", alignItems: "center", gap: 8,
+        fontSize: 14, color: C.text, cursor: "pointer", marginBottom: 20,
+      }}>
+        <input
+          type="checkbox"
+          checked={showInactive}
+          onChange={e => setShowInactive(e.target.checked)}
+          style={{ width: 16, height: 16, cursor: "pointer" }}
+        />
+        Deaktivierte anzeigen
+      </label>
 
       {loading ? (
         <p style={{ color: C.muted }}>Lade...</p>
       ) : (
-        <div style={{ background: C.surface, borderRadius: 8, border: `1px solid ${C.border}`, overflow: "hidden" }}>
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: C.bg, borderBottom: `1px solid ${C.border}` }}>
-                {["Benutzername", "E-Mail", "Rollen", "Status", "Erstellt", "Aktionen"].map(h => (
-                  <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: C.muted }}>{h}</th>
-                ))}
+              <tr>
+                <TH>Username</TH>
+                <TH>Email</TH>
+                <TH>Registriert</TH>
+                <TH>Aktiv</TH>
+                <TH>Admin</TH>
+                <TH>Aktionen</TH>
               </tr>
             </thead>
             <tbody>
-              {users.map(u => (
+              {visible.map(u => (
                 <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                  <td style={{ padding: "12px 16px", fontSize: 14, color: C.text, fontWeight: 500 }}>{u.username}</td>
-                  <td style={{ padding: "12px 16px", fontSize: 13, color: C.muted }}>{u.email}</td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      {u.roles.map(r => <Badge key={r} label={r} color={ROLE_COLORS[r]} />)}
-                    </div>
-                  </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <Badge label={u.is_active ? "Aktiv" : "Inaktiv"} color={u.is_active ? C.success : C.muted} />
-                  </td>
-                  <td style={{ padding: "12px 16px", fontSize: 12, color: C.muted }}>
+                  <td style={{ padding: "14px 16px", fontSize: 14, color: C.text }}>{u.username}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 14, color: C.muted }}>{u.email}</td>
+                  <td style={{ padding: "14px 16px", fontSize: 14, color: C.muted }}>
                     {new Date(u.created_at).toLocaleDateString("de-DE")}
                   </td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <Btn small variant="ghost" onClick={() => setEditUser({ ...u })}>Bearbeiten</Btn>
-                      {u.id !== currentUser.id && (
-                        <Btn small variant={u.is_active ? "danger" : "secondary"} onClick={() => toggleActive(u)}>
-                          {u.is_active ? "Deaktivieren" : "Aktivieren"}
-                        </Btn>
-                      )}
-                    </div>
+                  <td style={{ padding: "14px 16px" }}>
+                    <Toggle
+                      checked={u.is_active}
+                      onChange={() => toggleActive(u)}
+                      disabled={u.id === currentUser.id}
+                    />
+                  </td>
+                  <td style={{ padding: "14px 16px" }}>
+                    <Toggle
+                      checked={u.roles.includes("ADMIN")}
+                      onChange={() => toggleAdmin(u)}
+                      disabled={u.id === currentUser.id}
+                    />
+                  </td>
+                  <td style={{ padding: "14px 16px" }}>
+                    {u.id !== currentUser.id && (
+                      <button
+                        onClick={() => toggleActive(u)}
+                        style={{
+                          padding: "6px 16px", borderRadius: 6, border: "none",
+                          background: "#e53e3e", color: "#fff",
+                          fontSize: 13, fontWeight: 500, cursor: "pointer",
+                        }}
+                      >
+                        Löschen
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -439,44 +471,9 @@ function UsersSection({ currentUser }) {
             <Input label="Benutzername" value={form.username} onChange={v => setForm(f => ({ ...f, username: v }))} required />
             <Input label="E-Mail" type="email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} required />
             <Input label="Passwort" type="password" value={form.password} onChange={v => setForm(f => ({ ...f, password: v }))} required />
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 500, color: C.text, display: "block", marginBottom: 6 }}>Rolle</label>
-              <select
-                value={form.roles[0]}
-                onChange={e => setForm(f => ({ ...f, roles: [e.target.value] }))}
-                style={{ padding: "8px 12px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 14, width: "100%" }}
-              >
-                {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
               <Btn variant="ghost" onClick={() => setShowCreate(false)}>Abbrechen</Btn>
               <Btn>Erstellen</Btn>
-            </div>
-          </form>
-        </Modal>
-      )}
-
-      {/* Edit modal */}
-      {editUser && (
-        <Modal title="Benutzer bearbeiten" onClose={() => setEditUser(null)}>
-          <form onSubmit={handleUpdate} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: "8px 12px", background: C.bg, borderRadius: 6, fontSize: 13, color: C.muted }}>
-              {editUser.username} — {editUser.email}
-            </div>
-            <div>
-              <label style={{ fontSize: 13, fontWeight: 500, color: C.text, display: "block", marginBottom: 6 }}>Rolle</label>
-              <select
-                value={editUser.roles[0]}
-                onChange={e => setEditUser(u => ({ ...u, roles: [e.target.value] }))}
-                style={{ padding: "8px 12px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 14, width: "100%" }}
-              >
-                {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
-              <Btn variant="ghost" onClick={() => setEditUser(null)}>Abbrechen</Btn>
-              <Btn>Speichern</Btn>
             </div>
           </form>
         </Modal>
@@ -611,107 +608,221 @@ function Placeholder({ sprint, feature }) {
 }
 
 // ---------------------------------------------------------------------------
+// Toggle switch component
+// ---------------------------------------------------------------------------
+
+function Toggle({ checked, onChange, disabled }) {
+  return (
+    <button
+      onClick={() => !disabled && onChange(!checked)}
+      disabled={disabled}
+      style={{
+        position: "relative", width: 44, height: 24,
+        borderRadius: 12, border: "none", cursor: disabled ? "not-allowed" : "pointer",
+        background: checked ? C.primary : "#cccccc",
+        transition: "background 0.2s", padding: 0, flexShrink: 0,
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      <span style={{
+        position: "absolute", top: 3, left: checked ? 23 : 3,
+        width: 18, height: 18, borderRadius: "50%", background: "#fff",
+        transition: "left 0.2s", display: "block",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+      }} />
+    </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Admin — icon-only sidebar
+// ---------------------------------------------------------------------------
+
+const SIDEBAR_ICONS = [
+  { icon: "💬", action: "voice", title: "Sprachinterface" },
+  { icon: "👤", action: "users", title: "Benutzer" },
+]
+
+const SIDEBAR_BOTTOM_ICONS = [
+  { icon: "📊", action: "statistiken", title: "Statistiken" },
+  { icon: "📄", action: "audit", title: "Audit-Logs" },
+  { icon: "⚙️", action: "config", title: "Konfiguration" },
+]
+
+function AdminSidebar({ user, onLogout, onVoice, section, onSection }) {
+  const initial = (user.username || "?")[0].toUpperCase()
+
+  return (
+    <aside style={{
+      width: 52, background: C.sidebar,
+      display: "flex", flexDirection: "column", alignItems: "center",
+      position: "fixed", top: 0, bottom: 0, left: 0,
+      paddingTop: 12, paddingBottom: 12,
+    }}>
+      {/* Logo */}
+      <div style={{
+        fontSize: 9, fontWeight: 800, color: C.primary, letterSpacing: 0.5,
+        marginBottom: 20, textAlign: "center", lineHeight: 1.2,
+      }}>
+        XQT5
+      </div>
+
+      {/* Top icons */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+        {SIDEBAR_ICONS.map(item => (
+          <button
+            key={item.action}
+            title={item.title}
+            onClick={() => item.action === "voice" ? onVoice() : onSection(item.action)}
+            style={{
+              width: 36, height: 36, borderRadius: 8, border: "none",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              background: section === item.action ? "rgba(255,255,255,0.15)" : "transparent",
+              fontSize: 16, color: "rgba(255,255,255,0.7)",
+            }}
+          >
+            {item.icon}
+          </button>
+        ))}
+
+        <div style={{ height: 1, background: "rgba(255,255,255,0.1)", margin: "8px 6px" }} />
+
+        {SIDEBAR_BOTTOM_ICONS.map(item => (
+          <button
+            key={item.action}
+            title={item.title}
+            onClick={() => onSection(item.action)}
+            style={{
+              width: 36, height: 36, borderRadius: 8, border: "none",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              background: section === item.action ? `${C.primary}30` : "transparent",
+              fontSize: 16, color: section === item.action ? C.primary : "rgba(255,255,255,0.7)",
+            }}
+          >
+            {item.icon}
+          </button>
+        ))}
+      </div>
+
+      {/* User avatar + logout */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+        <div
+          title={user.username}
+          style={{
+            width: 32, height: 32, borderRadius: "50%",
+            background: C.primary, color: "#fff",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 13, fontWeight: 700,
+          }}
+        >
+          {initial}
+        </div>
+        <button
+          title="Abmelden"
+          onClick={onLogout}
+          style={{
+            width: 36, height: 36, borderRadius: 8, border: "none",
+            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            background: "transparent", fontSize: 16, color: "rgba(255,255,255,0.5)",
+          }}
+        >
+          →
+        </button>
+      </div>
+    </aside>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Admin — horizontal tab bar
+// ---------------------------------------------------------------------------
+
+const TABS = [
+  { id: "users",       label: "Benutzer" },
+  { id: "kosten",      label: "Kosten" },
+  { id: "statistiken", label: "Statistiken" },
+  { id: "retrieval",   label: "Retrieval" },
+  { id: "modelle",     label: "Modelle" },
+  { id: "config",      label: "Provider" },
+  { id: "audit",       label: "Audit-Logs" },
+]
+
+function TabBar({ active, onChange }) {
+  return (
+    <div style={{
+      display: "flex", gap: 0,
+      borderBottom: `1px solid ${C.border}`,
+      marginBottom: 24,
+    }}>
+      {TABS.map(tab => (
+        <button
+          key={tab.id}
+          onClick={() => onChange(tab.id)}
+          style={{
+            padding: "12px 16px", border: "none", background: "transparent",
+            cursor: "pointer", fontSize: 14,
+            color: active === tab.id ? C.primary : C.muted,
+            fontWeight: active === tab.id ? 600 : 400,
+            borderBottom: active === tab.id ? `2px solid ${C.primary}` : "2px solid transparent",
+            marginBottom: -1,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Admin view
 // ---------------------------------------------------------------------------
 
-const NAV_ITEMS = [
-  { id: "dashboard", label: "Dashboard", icon: "📊" },
-  { id: "flows", label: "Flows", icon: "⚡" },
-  { id: "sessions", label: "Sessions", icon: "💬" },
-  { id: "users", label: "Benutzer", icon: "👥" },
-  { id: "config", label: "Konfiguration", icon: "⚙️" },
-  { id: "audit", label: "Audit-Log", icon: "📋" },
-]
-
 function AdminView({ user, onLogout, onVoice }) {
-  const [section, setSection] = useState("dashboard")
+  const [section, setSection] = useState("users")
 
   function renderContent() {
     switch (section) {
-      case "dashboard": return <DashboardSection />
-      case "users": return <UsersSection currentUser={user} />
-      case "audit": return <AuditSection />
-      case "flows": return <Placeholder sprint={3} feature="Flow-Verwaltung" />
-      case "sessions": return <Placeholder sprint={4} feature="Sessions-Übersicht" />
-      case "config": return <Placeholder sprint={5} feature="Provider-Konfiguration" />
-      default: return null
+      case "users":       return <UsersSection currentUser={user} />
+      case "audit":       return <AuditSection />
+      case "statistiken": return <DashboardSection />
+      case "kosten":      return <Placeholder sprint={4} feature="Kosten-Übersicht" />
+      case "retrieval":   return <Placeholder sprint={4} feature="Retrieval-Verwaltung" />
+      case "modelle":     return <Placeholder sprint={3} feature="Modell-Konfiguration" />
+      case "config":      return <Placeholder sprint={5} feature="Provider-Konfiguration" />
+      default:            return null
     }
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, display: "flex" }}>
-      {/* Sidebar */}
-      <aside style={{
-        width: 220, background: C.sidebar,
-        display: "flex", flexDirection: "column",
-        position: "fixed", top: 0, bottom: 0, left: 0,
-      }}>
-        <div style={{ padding: "20px 16px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: "50%",
-              background: C.primary, display: "flex", alignItems: "center",
-              justifyContent: "center", fontSize: 16, flexShrink: 0,
-            }}>🎤</div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#ffffff" }}>Sprachbot</div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)" }}>Admin</div>
-            </div>
-          </div>
-        </div>
-
-        <nav style={{ flex: 1, padding: "12px 8px" }}>
-          {NAV_ITEMS.map(item => (
-            <button
-              key={item.id}
-              onClick={() => setSection(item.id)}
-              style={{
-                width: "100%", padding: "9px 12px",
-                borderRadius: 6, border: "none", cursor: "pointer",
-                display: "flex", alignItems: "center", gap: 10,
-                background: section === item.id ? "rgba(255,255,255,0.1)" : "transparent",
-                color: section === item.id ? "#ffffff" : "rgba(255,255,255,0.55)",
-                fontSize: 13, fontWeight: section === item.id ? 600 : 400,
-                marginBottom: 2,
-                borderLeft: section === item.id ? `3px solid ${C.primary}` : "3px solid transparent",
-              }}
-            >
-              <span>{item.icon}</span>
-              {item.label}
-            </button>
-          ))}
-        </nav>
-
-        <div style={{ padding: "12px 8px", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", padding: "4px 12px", marginBottom: 4 }}>
-            {user.username}
-          </div>
-          <button
-            onClick={onVoice}
-            style={{
-              width: "100%", padding: "9px 12px", borderRadius: 6, border: "none",
-              cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
-              background: "transparent", color: "rgba(255,255,255,0.55)", fontSize: 13, marginBottom: 2,
-            }}
-          >
-            🎤 Sprachinterface
-          </button>
-          <button
-            onClick={onLogout}
-            style={{
-              width: "100%", padding: "9px 12px", borderRadius: 6, border: "none",
-              cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
-              background: "transparent", color: "rgba(255,255,255,0.55)", fontSize: 13,
-            }}
-          >
-            ← Abmelden
-          </button>
-        </div>
-      </aside>
+    <div style={{ minHeight: "100vh", background: C.surface, display: "flex" }}>
+      <AdminSidebar
+        user={user}
+        onLogout={onLogout}
+        onVoice={onVoice}
+        section={section}
+        onSection={setSection}
+      />
 
       {/* Main content */}
-      <main style={{ marginLeft: 220, flex: 1, padding: 32 }}>
-        {renderContent()}
+      <main style={{ marginLeft: 52, flex: 1, display: "flex", flexDirection: "column" }}>
+        {/* Page header */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "20px 32px", borderBottom: `1px solid ${C.border}`,
+        }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: C.text }}>Admin-Dashboard</h1>
+          <Btn variant="ghost" onClick={onVoice}>Zurück zum Chat</Btn>
+        </div>
+
+        {/* Tabs + content */}
+        <div style={{ padding: "0 32px 32px" }}>
+          <div style={{ paddingTop: 20 }}>
+            <TabBar active={section} onChange={setSection} />
+            {renderContent()}
+          </div>
+        </div>
       </main>
     </div>
   )

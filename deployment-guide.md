@@ -2,10 +2,10 @@
 
 ## Voraussetzungen
 
-- Coolify installiert und erreichbar
-- Supabase-Projekt angelegt (Cloud oder self-hosted)
+- Coolify installiert und erreichbar (xqtfive)
+- Supabase self-hosted: `https://supabase.xqtfive.de`
 - Mistral AI API-Key (platform.mistral.ai)
-- Git-Repository mit dem Sprachbot-Code
+- Git-Repository: `https://github.com/christian-rost/sprachbot`
 - Domain mit DNS-Zugang
 
 ---
@@ -14,19 +14,22 @@
 
 ### 1.1 Schema anlegen
 
-Im Supabase Dashboard → SQL Editor → New Query:
+→ `https://supabase.xqtfive.de` → **SQL Editor → New Query**
 
-```sql
--- Inhalt von supabase/schema.sql ausführen
--- Tabellen: sb_users, sb_sessions, sb_messages, sb_flows,
---           sb_config_providers, sb_config_webhooks, sb_audit_log, sb_tenants
-```
+Inhalt von `supabase/schema.sql` einfügen und **Run** klicken.
+
+Erstellt folgende Tabellen (Prefix `sb_`):
+- `sb_users`, `sb_audit_log` — Sprint 1
+- `sb_sessions`, `sb_messages` — Sprint 2+
+- `sb_flows`, `sb_flow_versions` — Sprint 3+
+- `sb_config_providers`, `sb_config_webhooks` — Sprint 4+
 
 ### 1.2 Verbindungsdaten notieren
 
-- **Supabase URL**: `https://<projekt-id>.supabase.co`
-- **Supabase anon key**: Settings → API → anon/public
-- **Supabase service_role key**: Settings → API → service_role (nur Backend!)
+→ `https://supabase.xqtfive.de` → **Project Settings → API**
+
+- **Supabase URL**: `https://supabase.xqtfive.de`
+- **service_role key**: langer JWT unter „service_role" (nur Backend — geheim halten!)
 
 ---
 
@@ -34,70 +37,61 @@ Im Supabase Dashboard → SQL Editor → New Query:
 
 ### 2.1 Neues Projekt in Coolify
 
-1. Coolify Dashboard → Projects → New Project → "sprachbot"
-2. New Resource → Docker Compose
-3. Repository-URL eingeben (GitHub/GitLab/Gitea)
+1. Coolify Dashboard → **Projects → New Project** → Name: `sprachbot`
+2. **New Resource → Docker Compose**
+3. Repository: `https://github.com/christian-rost/sprachbot`
 4. Branch: `main`
 5. Docker Compose File: `docker-compose.coolify.yml`
 
 ### 2.2 Umgebungsvariablen
 
-Im Coolify-Dashboard → Environment Variables:
+Im Coolify-Dashboard → **Environment Variables**:
 
 ```bash
-# Backend
-
 ENVIRONMENT=production
 PORT=8000
+
+# Supabase (self-hosted)
+SUPABASE_URL=https://supabase.xqtfive.de
+SUPABASE_KEY=<service_role key aus Supabase Settings → API>
+
+# JWT — generieren: openssl rand -base64 32
 JWT_SECRET=<min. 32 zufällige Zeichen>
 
-# Supabase
-SUPABASE_URL=https://<projekt-id>.supabase.co
-SUPABASE_KEY=<service_role_key>
-
-# Mistral AI (STT + LLM + TTS)
-MISTRAL_API_KEY=<mistral-api-key>
-MISTRAL_LLM_MODEL=mistral-large-latest
-MISTRAL_STT_MODEL=<mistral-speech-to-text-modell>
-MISTRAL_TTS_MODEL=<mistral-tts-modell>
-
-# Admin-Erstbenutzer (nur beim ersten Start)
+# Admin-Erstbenutzer (nur beim ersten Start ausgewertet)
 ADMIN_USERNAME=admin
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=<temporäres-startpasswort>
+ADMIN_PASSWORD=<sicheres startpasswort>
 
-# Sicherheit
-CORS_ORIGINS=https://sprachbot.example.com
-PROVIDER_KEY_ENCRYPTION_KEY=<32-Byte AES-Key, Base64-encoded>
+# CORS + Frontend-URL
+CORS_ORIGINS=https://sprachbot.xqtfive.de
+VITE_API_BASE=https://api.sprachbot.xqtfive.de
 
-# Frontend (Build-Zeit)
-VITE_API_BASE=https://api.sprachbot.example.com
-```
+# Mistral AI (Sprint 2 — jetzt leer lassen)
+MISTRAL_API_KEY=
+MISTRAL_LLM_MODEL=mistral-large-latest
+MISTRAL_STT_MODEL=
+MISTRAL_TTS_MODEL=
 
-**JWT_SECRET generieren:**
-```bash
-openssl rand -base64 32
-```
-
-**PROVIDER_KEY_ENCRYPTION_KEY generieren:**
-```bash
-openssl rand -base64 32
+# Verschlüsselung Provider-Keys — generieren: openssl rand -base64 32
+PROVIDER_KEY_ENCRYPTION_KEY=
 ```
 
 ### 2.3 Domains konfigurieren
 
-Im Coolify Dashboard → Service → Domains:
+Im Coolify Dashboard → Service → **Domains**:
 
-- **Backend**: `api.sprachbot.example.com` → Port 8000
-- **Frontend**: `sprachbot.example.com` → Port 80
+| Service | Domain | Port |
+|---------|--------|------|
+| backend | `api.sprachbot.xqtfive.de` | 8000 |
+| frontend | `sprachbot.xqtfive.de` | 80 |
 
-Coolify übernimmt automatisch SSL-Zertifikate via Let's Encrypt.
+SSL-Zertifikate werden automatisch via Let's Encrypt ausgestellt.
 
 ### 2.4 DNS-Einträge
 
 ```
-A sprachbot.example.com       → <Coolify-Server-IP>
-A api.sprachbot.example.com   → <Coolify-Server-IP>
+A  sprachbot.xqtfive.de      → <Coolify-Server-IP>
+A  api.sprachbot.xqtfive.de  → <Coolify-Server-IP>
 ```
 
 ---
@@ -238,17 +232,19 @@ server {
 ### 5.2 Gesundheitscheck
 
 ```bash
-curl https://api.sprachbot.example.com/health
-# → { "status": "ok", "database": "connected", "version": "1.0.0" }
+curl https://api.sprachbot.xqtfive.de/health
+# → { "status": "ok", "database": "connected", "version": "0.1.0" }
 ```
 
 ### 5.3 Admin-Erstlogin
 
-1. `https://sprachbot.example.com/admin` aufrufen
+1. `https://sprachbot.xqtfive.de` aufrufen
 2. Login mit `ADMIN_USERNAME` und `ADMIN_PASSWORD`
-3. Passwort sofort ändern (Setup-Wizard)
+3. Im Admin-Panel: Benutzer verwalten, Audit-Log prüfen
 
-### 5.4 Mistral Provider konfigurieren
+### 5.4 Mistral Provider konfigurieren (Sprint 2+)
+
+Mistral-API-Key wird erst in Sprint 2 benötigt. Nach dem Update:
 
 Admin-Panel → Konfiguration → Provider:
 

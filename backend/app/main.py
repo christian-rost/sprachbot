@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -29,12 +30,20 @@ from .mistral_client import MistralError
 from .session_storage import (
     add_message,
     create_session,
+    expire_inactive_sessions,
     get_session,
     list_messages,
     list_sessions,
     update_session,
 )
 from .stt_service import transcribe, validate_audio
+from .webhook_storage import (
+    create_webhook,
+    delete_webhook,
+    get_webhook,
+    list_webhooks,
+    update_webhook,
+)
 try:
     from .tts_service import synthesize as _synthesize
     def synthesize(text): return _synthesize(text)
@@ -99,7 +108,7 @@ class UpdateUserRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     if ADMIN_USERNAME and ADMIN_PASSWORD:
         user = bootstrap_admin(ADMIN_USERNAME, ADMIN_PASSWORD)
         if user:
@@ -107,6 +116,19 @@ def on_startup():
     else:
         logger.warning("ADMIN_USERNAME / ADMIN_PASSWORD not set — no admin bootstrapped")
     seed_example_flows()
+    asyncio.create_task(_session_timeout_loop())
+
+
+async def _session_timeout_loop():
+    """Läuft alle 5 Minuten und schließt inaktive Sessions (>30 Min ohne Aktivität)."""
+    while True:
+        await asyncio.sleep(300)
+        try:
+            n = expire_inactive_sessions(timeout_minutes=30)
+            if n:
+                logger.info("Session-Timeout: %d Session(s) abgelaufen", n)
+        except Exception as e:
+            logger.warning("Session-Timeout Fehler: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +299,18 @@ def get_messages(session_id: str, current_user: Dict = Depends(get_current_user)
     if session["user_id"] != current_user["id"] and not _is_admin(current_user):
         raise HTTPException(status_code=403, detail="Kein Zugriff")
     return list_messages(session_id)
+
+
+# ---------------------------------------------------------------------------
+# Admin — Sessions
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/sessions")
+def admin_list_sessions(
+    limit: int = 200,
+    current_user: Dict = Depends(require_admin_or_operator),
+):
+    return list_sessions(limit=limit)
 
 
 # ---------------------------------------------------------------------------
@@ -602,6 +636,89 @@ def admin_upsert_provider(
         details={"fields": list(updates.keys())},
     )
     return config
+
+
+# ---------------------------------------------------------------------------
+# Webhooks (Admin)
+# ---------------------------------------------------------------------------
+
+class WebhookIn(BaseModel):
+    name: str
+    url: str
+    method: Optional[str] = "POST"
+    auth_type: Optional[str] = "none"
+    auth_data: Optional[str] = None
+    headers: Optional[Dict] = None
+    timeout_seconds: Optional[int] = 15
+    retry_max: Optional[int] = 3
+
+
+@app.get("/api/admin/webhooks")
+def admin_list_webhooks(current_user: Dict = Depends(require_admin)):
+    return list_webhooks()
+
+
+@app.get("/api/admin/webhooks/{webhook_id}")
+def admin_get_webhook(webhook_id: str, current_user: Dict = Depends(require_admin)):
+    wh = get_webhook(webhook_id)
+    if not wh:
+        raise HTTPException(status_code=404, detail="Webhook nicht gefunden")
+    if wh.get("auth_data"):
+        wh = {**wh, "auth_data": "***"}
+    return wh
+
+
+@app.post("/api/admin/webhooks", status_code=201)
+def admin_create_webhook(body: WebhookIn, current_user: Dict = Depends(require_admin)):
+    wh = create_webhook(
+        name=body.name,
+        url=body.url,
+        method=body.method or "POST",
+        auth_type=body.auth_type or "none",
+        auth_data=body.auth_data,
+        headers=body.headers,
+        timeout_seconds=body.timeout_seconds or 15,
+        retry_max=body.retry_max or 3,
+    )
+    log_event("webhook_created", current_user["id"], "webhook", wh["id"], {"name": wh["name"]})
+    if wh.get("auth_data"):
+        wh = {**wh, "auth_data": "***"}
+    return wh
+
+
+@app.put("/api/admin/webhooks/{webhook_id}")
+def admin_update_webhook(webhook_id: str, body: Dict, current_user: Dict = Depends(require_admin)):
+    wh = update_webhook(webhook_id, body)
+    if not wh:
+        raise HTTPException(status_code=404, detail="Webhook nicht gefunden")
+    log_event("webhook_updated", current_user["id"], "webhook", webhook_id, {"fields": list(body.keys())})
+    if wh.get("auth_data"):
+        wh = {**wh, "auth_data": "***"}
+    return wh
+
+
+@app.delete("/api/admin/webhooks/{webhook_id}", status_code=204)
+def admin_delete_webhook(webhook_id: str, current_user: Dict = Depends(require_admin)):
+    if not delete_webhook(webhook_id):
+        raise HTTPException(status_code=404, detail="Webhook nicht gefunden")
+    log_event("webhook_deleted", current_user["id"], "webhook", webhook_id)
+    return None
+
+
+@app.post("/api/admin/webhooks/{webhook_id}/test")
+def admin_test_webhook(webhook_id: str, current_user: Dict = Depends(require_admin)):
+    """Sendet einen Test-Payload an den Webhook."""
+    from .webhook_service import WebhookError, execute_webhook
+    try:
+        result = execute_webhook(
+            webhook_id=webhook_id,
+            slots={"test": "true"},
+            session_id="test",
+            payload_template=None,
+        )
+        return {"success": True, **result}
+    except WebhookError as e:
+        return {"success": False, "error": str(e), "status_code": e.status_code}
 
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ Session- und Message-Storage — CRUD mit Supabase + In-Memory-Fallback.
 """
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .config import MESSAGES_TABLE, SESSIONS_TABLE
 from .database import get_db
@@ -199,3 +199,38 @@ def list_messages(session_id: str) -> list[dict]:
             logger.warning("Supabase message list fehlgeschlagen: %s", e)
 
     return _mem_messages.get(session_id, [])
+
+
+def expire_inactive_sessions(timeout_minutes: int = 30) -> int:
+    """Markiert aktive Sessions ohne Aktivität als 'timeout'. Gibt Anzahl zurück."""
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
+    count = 0
+
+    db = get_db()
+    if db:
+        try:
+            result = (
+                db.table(SESSIONS_TABLE)
+                .update({"status": "timeout"})
+                .eq("status", "active")
+                .lt("started_at", cutoff.isoformat())
+                .execute()
+            )
+            count += len(result.data)
+        except Exception as e:
+            logger.warning("Supabase session expire fehlgeschlagen: %s", e)
+
+    for s in _mem_sessions.values():
+        if s.get("status") == "active":
+            ts = s.get("updated_at") or s.get("created_at", "")
+            try:
+                updated_dt = datetime.fromisoformat(ts)
+                if updated_dt.tzinfo is None:
+                    updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+                if updated_dt < cutoff:
+                    s["status"] = "timeout"
+                    count += 1
+            except Exception:
+                pass
+
+    return count

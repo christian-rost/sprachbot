@@ -234,7 +234,6 @@ def process_turn(
 
     # Bestätigung erhalten oder kein Bestätigungsschritt → abschließen
     if confirmation_template:
-        # Nutzer-Antwort prüfen
         confirmed = _is_confirmation(user_text)
         if not confirmed:
             return {
@@ -245,6 +244,33 @@ def process_turn(
                 "flow_id": flow["id"],
                 "updated_session": {"intent": None, "slots": {}, "status": "active"},
             }
+
+    # Webhook ausführen falls konfiguriert
+    action_def = definition.get("action", {})
+    webhook_error = None
+    if action_def.get("type") == "webhook" and action_def.get("webhook_id"):
+        try:
+            from .webhook_service import WebhookError, execute_webhook
+            execute_webhook(
+                webhook_id=action_def["webhook_id"],
+                slots=current_slots,
+                session_id=session.get("id"),
+                payload_template=action_def.get("payload_template"),
+            )
+        except Exception as e:
+            webhook_error = str(e)
+            logger.warning("Webhook-Ausführung fehlgeschlagen: %s", e)
+
+    if webhook_error:
+        return {
+            "reply": f"Die Aktion konnte leider nicht ausgeführt werden. Bitte versuchen Sie es später erneut.",
+            "intent": current_intent,
+            "slots": current_slots,
+            "action": "error",
+            "flow_id": flow["id"],
+            "updated_session": {"intent": current_intent, "slots": current_slots},
+            "error": webhook_error,
+        }
 
     success = render_template(
         definition.get("success_message", "Ihre Anfrage wurde erfolgreich ausgeführt."),

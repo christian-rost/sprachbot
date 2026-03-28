@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from "react"
 import {
   createUser,
+  createWebhook,
+  deleteWebhook,
   getStats,
+  listAdminSessions,
   listAuditLog,
+  listFlows,
   listProviders,
   listUsers,
+  listWebhooks,
   login,
   logout,
   me,
   processAudio,
   startSession,
+  testWebhook,
   updateUser,
+  updateWebhook,
   upsertProvider,
 } from "./api"
 import VoiceRecorder from "./VoiceRecorder"
@@ -780,6 +787,283 @@ function DashboardSection() {
 }
 
 // ---------------------------------------------------------------------------
+// Admin — Sessions section
+// ---------------------------------------------------------------------------
+
+const STATUS_COLORS = {
+  active: C.success,
+  completed: C.primary,
+  timeout: C.warning,
+  abandoned: C.error,
+  cancelled: C.muted,
+}
+
+function SessionsSection() {
+  const [sessions, setSessions] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    listAdminSessions(200)
+      .then(setSessions)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [])
+
+  return (
+    <div>
+      <ErrorBanner msg={error} />
+      {loading ? (
+        <p style={{ color: C.muted }}>Lade...</p>
+      ) : (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: C.bg, borderBottom: `1px solid ${C.border}` }}>
+                {["ID", "Benutzer", "Status", "Intent", "Turns", "Erstellt"].map(h => (
+                  <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: C.muted }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.length === 0 ? (
+                <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: C.muted }}>Keine Sessions</td></tr>
+              ) : sessions.map(s => (
+                <tr key={s.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "10px 16px", fontSize: 12, color: C.muted, fontFamily: "monospace" }}>
+                    {s.id.slice(0, 8)}…
+                  </td>
+                  <td style={{ padding: "10px 16px", fontSize: 13, color: C.muted }}>
+                    {s.user_id?.slice(0, 8)}…
+                  </td>
+                  <td style={{ padding: "10px 16px" }}>
+                    <Badge label={s.status} color={STATUS_COLORS[s.status] || C.muted} />
+                  </td>
+                  <td style={{ padding: "10px 16px", fontSize: 13, color: C.text }}>
+                    {s.intent || "—"}
+                  </td>
+                  <td style={{ padding: "10px 16px", fontSize: 13, color: C.muted, textAlign: "center" }}>
+                    {s.turn_count}
+                  </td>
+                  <td style={{ padding: "10px 16px", fontSize: 12, color: C.muted, whiteSpace: "nowrap" }}>
+                    {new Date(s.created_at).toLocaleString("de-DE")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Admin — Flows section
+// ---------------------------------------------------------------------------
+
+function FlowsSection() {
+  const [flows, setFlows] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    listFlows()
+      .then(setFlows)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [])
+
+  return (
+    <div>
+      <ErrorBanner msg={error} />
+      {loading ? (
+        <p style={{ color: C.muted }}>Lade...</p>
+      ) : (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: C.bg, borderBottom: `1px solid ${C.border}` }}>
+                {["Name", "Intent", "Slots", "Aktiv", "Priorität"].map(h => (
+                  <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: C.muted }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {flows.length === 0 ? (
+                <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: C.muted }}>Keine Flows</td></tr>
+              ) : flows.map(f => (
+                <tr key={f.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 500, color: C.text }}>{f.name}</td>
+                  <td style={{ padding: "12px 16px" }}>
+                    <Badge label={f.intent_name} color={C.primary} />
+                  </td>
+                  <td style={{ padding: "12px 16px", fontSize: 13, color: C.muted }}>
+                    {Object.keys(f.definition?.slots || {}).join(", ") || "—"}
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    <Badge label={f.is_active ? "Aktiv" : "Inaktiv"} color={f.is_active ? C.success : C.muted} />
+                  </td>
+                  <td style={{ padding: "12px 16px", fontSize: 13, color: C.muted }}>{f.priority ?? 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{ marginTop: 16 }}>
+        <Placeholder sprint={5} feature="Flow-Editor (Slots, Bestätigung, Webhook-Verknüpfung)" />
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Admin — Webhooks section
+// ---------------------------------------------------------------------------
+
+function WebhooksSection() {
+  const [webhooks, setWebhooks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+  const [showCreate, setShowCreate] = useState(false)
+  const [testResults, setTestResults] = useState({})
+  const [form, setForm] = useState({ name: "", url: "", method: "POST", auth_type: "none", auth_data: "", timeout_seconds: 15, retry_max: 3 })
+
+  useEffect(() => { load() }, [])
+
+  async function load() {
+    setLoading(true)
+    try { setWebhooks(await listWebhooks()) } catch (e) { setError(e.message) }
+    setLoading(false)
+  }
+
+  async function handleCreate(e) {
+    e.preventDefault()
+    try {
+      await createWebhook(form)
+      setShowCreate(false)
+      setForm({ name: "", url: "", method: "POST", auth_type: "none", auth_data: "", timeout_seconds: 15, retry_max: 3 })
+      await load()
+    } catch (e) { setError(e.message) }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm("Webhook wirklich löschen?")) return
+    try { await deleteWebhook(id); await load() } catch (e) { setError(e.message) }
+  }
+
+  async function handleToggle(wh) {
+    try {
+      await updateWebhook(wh.id, { is_active: !wh.is_active })
+      await load()
+    } catch (e) { setError(e.message) }
+  }
+
+  async function handleTest(id) {
+    setTestResults(r => ({ ...r, [id]: "..." }))
+    try {
+      const res = await testWebhook(id)
+      setTestResults(r => ({ ...r, [id]: res.success ? `✓ HTTP ${res.status_code}` : `✗ ${res.error}` }))
+    } catch (e) {
+      setTestResults(r => ({ ...r, [id]: `✗ ${e.message}` }))
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+        <Btn small onClick={() => setShowCreate(true)}>+ Webhook</Btn>
+      </div>
+      <ErrorBanner msg={error} />
+      {loading ? (
+        <p style={{ color: C.muted }}>Lade...</p>
+      ) : (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: C.bg, borderBottom: `1px solid ${C.border}` }}>
+                {["Name", "URL", "Auth", "Aktiv", "Test", "Aktionen"].map(h => (
+                  <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: 12, fontWeight: 600, color: C.muted }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {webhooks.length === 0 ? (
+                <tr><td colSpan={6} style={{ padding: 24, textAlign: "center", color: C.muted }}>Keine Webhooks konfiguriert</td></tr>
+              ) : webhooks.map(wh => (
+                <tr key={wh.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "12px 16px", fontSize: 14, fontWeight: 500, color: C.text }}>{wh.name}</td>
+                  <td style={{ padding: "12px 16px", fontSize: 12, color: C.muted, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {wh.url}
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    <Badge label={wh.auth_type} color={wh.auth_type !== "none" ? C.primary : C.muted} />
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    <Toggle checked={wh.is_active} onChange={() => handleToggle(wh)} />
+                  </td>
+                  <td style={{ padding: "12px 16px", fontSize: 12, color: testResults[wh.id]?.startsWith("✓") ? C.success : C.error }}>
+                    <Btn small variant="ghost" onClick={() => handleTest(wh.id)}>Test</Btn>
+                    {testResults[wh.id] && <span style={{ marginLeft: 8 }}>{testResults[wh.id]}</span>}
+                  </td>
+                  <td style={{ padding: "12px 16px" }}>
+                    <Btn small variant="danger" onClick={() => handleDelete(wh.id)}>Löschen</Btn>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showCreate && (
+        <Modal title="Webhook erstellen" onClose={() => setShowCreate(false)}>
+          <form onSubmit={handleCreate} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Input label="Name" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} required />
+            <Input label="URL" value={form.url} onChange={v => setForm(f => ({ ...f, url: v }))} placeholder="https://..." required />
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{ fontSize: 13, fontWeight: 500, color: C.text }}>Methode</label>
+                <select
+                  value={form.method}
+                  onChange={e => setForm(f => ({ ...f, method: e.target.value }))}
+                  style={{ padding: "8px 12px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 14 }}
+                >
+                  {["POST", "PUT", "PATCH", "GET"].map(m => <option key={m}>{m}</option>)}
+                </select>
+              </div>
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                <label style={{ fontSize: 13, fontWeight: 500, color: C.text }}>Auth-Typ</label>
+                <select
+                  value={form.auth_type}
+                  onChange={e => setForm(f => ({ ...f, auth_type: e.target.value }))}
+                  style={{ padding: "8px 12px", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 14 }}
+                >
+                  {["none", "bearer", "basic", "api_key"].map(a => <option key={a}>{a}</option>)}
+                </select>
+              </div>
+            </div>
+            {form.auth_type !== "none" && (
+              <Input
+                label={form.auth_type === "bearer" ? "Bearer Token" : form.auth_type === "basic" ? "user:password" : "Header-Name:Wert"}
+                type="password"
+                value={form.auth_data}
+                onChange={v => setForm(f => ({ ...f, auth_data: v }))}
+              />
+            )}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+              <Btn variant="ghost" onClick={() => setShowCreate(false)}>Abbrechen</Btn>
+              <Btn>Erstellen</Btn>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Placeholder for sections not yet implemented
 // ---------------------------------------------------------------------------
 
@@ -930,6 +1214,7 @@ const TABS = [
   { id: "users",       label: "Benutzer" },
   { id: "sessions",    label: "Sessions" },
   { id: "flows",       label: "Flows" },
+  { id: "webhooks",    label: "Webhooks" },
   { id: "config",      label: "Provider" },
   { id: "audit",       label: "Audit-Logs" },
   { id: "statistiken", label: "Statistiken" },
@@ -973,11 +1258,12 @@ function AdminView({ user, onLogout, onVoice }) {
   function renderContent() {
     switch (section) {
       case "users":       return <UsersSection currentUser={user} />
+      case "sessions":    return <SessionsSection />
+      case "flows":       return <FlowsSection />
+      case "webhooks":    return <WebhooksSection />
+      case "config":      return <ProviderSection />
       case "audit":       return <AuditSection />
       case "statistiken": return <DashboardSection />
-      case "sessions":    return <Placeholder sprint={4} feature="Sessions-Übersicht" />
-      case "flows":       return <Placeholder sprint={3} feature="Flow-Verwaltung" />
-      case "config":      return <ProviderSection />
       default:            return null
     }
   }

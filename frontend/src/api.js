@@ -69,3 +69,21 @@ export const tts = (text) => request("POST", "/api/tts", { text })
 export const listProviders = () => request("GET", "/api/admin/providers")
 export const getProvider = (name) => request("GET", `/api/admin/providers/${name}`)
 export const upsertProvider = (name, data) => request("PUT", `/api/admin/providers/${name}`, data)
+
+// Admin — Sessions
+export const listAdminSessions = (limit = 200) => request("GET", `/api/admin/sessions?limit=${limit}`)
+
+// Flows (Admin)
+export const listFlows = () => request("GET", "/api/admin/flows")
+export const getFlow = (id) => request("GET", `/api/admin/flows/${id}`)
+export const createFlow = (data) => request("POST", "/api/admin/flows", data)
+export const updateFlow = (id, data) => request("PUT", `/api/admin/flows/${id}`, data)
+export const deleteFlow = (id) => request("DELETE", `/api/admin/flows/${id}`)
+
+// Webhooks (Admin)
+export const listWebhooks = () => request("GET", "/api/admin/webhooks")
+export const getWebhook = (id) => request("GET", `/api/admin/webhooks/${id}`)
+export const createWebhook = (data) => request("POST", "/api/admin/webhooks", data)
+export const updateWebhook = (id, data) => request("PUT", `/api/admin/webhooks/${id}`, data)
+export const deleteWebhook = (id) => request("DELETE", `/api/admin/webhooks/${id}`)
+export const testWebhook = (id) => request("POST", `/api/admin/webhooks/${id}/test`)

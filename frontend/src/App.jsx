@@ -1326,7 +1326,8 @@ function FlowsSection() {
                     </td>
                     <td style={{ padding: "12px 16px" }}>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <Btn small variant="ghost" onClick={() => setEditorFlow(f)}>Bearbeiten</Btn>
+                        <Btn small variant="ghost" onClick={() => { setEditFlow(f); setShowModal(true) }}>Bearbeiten</Btn>
+                        <Btn small variant="outline" onClick={() => setEditorFlow(f)}>⚡ Graph</Btn>
                         <Btn small variant="danger" onClick={() => handleDelete(f.id, f.name)}>Löschen</Btn>
                       </div>
                     </td>

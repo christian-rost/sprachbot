@@ -231,6 +231,7 @@ function VoiceView({ user, onLogout, onAdmin }) {
   const [transcript, setTranscript] = useState("")
   const [processing, setProcessing] = useState(false)
   const [ttsEnabled, setTtsEnabled] = useState(false)
+  const [ttsPlaying, setTtsPlaying] = useState(false)
   const [micMode, setMicMode] = useState(() => localStorage.getItem("sb_mic_mode") || "click")
   const [debugData, setDebugData] = useState(null)
   const [showDebug, setShowDebug] = useState(false)
@@ -311,7 +312,10 @@ function VoiceView({ user, onLogout, onAdmin }) {
     }
     const audio = new Audio(url)
     audioRef.current = audio
-    audio.play().catch(() => {})
+    setTtsPlaying(true)
+    audio.onended = () => setTtsPlaying(false)
+    audio.onerror = () => setTtsPlaying(false)
+    audio.play().catch(() => { setTtsPlaying(false) })
   }
 
   async function handleReset() {
@@ -425,6 +429,7 @@ function VoiceView({ user, onLogout, onAdmin }) {
             onTranscript={handleTranscript}
             onError={setError}
             disabled={!session || processing}
+            listeningPaused={ttsPlaying}
           />
 
           {/* Controls */}
@@ -434,7 +439,7 @@ function VoiceView({ user, onLogout, onAdmin }) {
               display: "flex", borderRadius: 20, overflow: "hidden",
               border: `1px solid ${C.border}`, fontSize: 12,
             }}>
-              {[["click", "🎤 Klicken"], ["hold", "🤏 Halten"]].map(([m, label]) => (
+              {[["click", "🎤 Klicken"], ["hold", "🤏 Halten"], ["auto", "👂 Auto"]].map(([m, label]) => (
                 <button
                   key={m}
                   onClick={() => { setMicMode(m); localStorage.setItem("sb_mic_mode", m) }}

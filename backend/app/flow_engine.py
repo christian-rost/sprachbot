@@ -11,7 +11,7 @@ import logging
 import re
 
 from .flow_storage import get_flow_by_intent, list_flows
-from .llm_service import detect_intent, generate_response
+from .llm_service import detect_intent, generate_response, generate_slot_reply
 from .mistral_client import MistralError
 
 logger = logging.getLogger(__name__)
@@ -155,9 +155,9 @@ def process_turn(
     flow = get_flow_by_intent(current_intent) if current_intent and current_intent != "unknown" else None
 
     if not flow:
-        # Kein passender Flow → freie LLM-Antwort
+        # Kein passender Flow → freie LLM-Antwort mit Wissen über verfügbare Flows
         try:
-            reply = generate_response(user_text, messages)
+            reply = generate_response(user_text, messages, available_flows=flows_for_llm)
         except MistralError:
             reply = "Ich kann Ihnen bei diesem Anliegen leider nicht helfen. Bitte kontaktieren Sie den Support."
         return {
@@ -209,9 +209,19 @@ def process_turn(
 
         if missing:
             next_slot = missing[0]
-            question = slot_defs[next_slot].get("question", f"Bitte geben Sie {next_slot} an.")
+            static_question = slot_defs[next_slot].get("question", f"Bitte geben Sie {next_slot} an.")
+            try:
+                reply = generate_slot_reply(
+                    user_text=user_text,
+                    flow_name=flow.get("name", current_intent),
+                    next_question=static_question,
+                    collected_slots=current_slots,
+                    conversation_history=messages,
+                )
+            except Exception:
+                reply = static_question
             return {
-                "reply": question,
+                "reply": reply,
                 "intent": current_intent,
                 "slots": current_slots,
                 "action": None,

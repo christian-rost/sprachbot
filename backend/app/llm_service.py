@@ -25,22 +25,15 @@ Deine Aufgabe:
   "slots": {
     "<slot_name>": "<wert oder null>"
   },
-  "needs_clarification": <true oder false>,
+  "needs_clarification": <false oder true>,
   "clarification_question": "<Rückfrage an den Nutzer oder null>"
 }
 
 Regeln:
-- Sei präzise bei der Intent-Erkennung
+- Verwende 'unknown' wenn die Aussage kein klarer Auftrag für einen der Flows ist (z.B. allgemeine Fragen, Smalltalk)
 - Extrahiere nur Slots die explizit genannt wurden
 - Bei Unklarheit: needs_clarification=true und eine konkrete Rückfrage stellen
-- Antworte immer auf Deutsch
 - KEINE Erklärungen außerhalb des JSON
-"""
-
-SYSTEM_PROMPT_CHAT = """\
-Du bist ein freundlicher, professioneller Sprachbot-Assistent.
-Antworte präzise, höflich und auf Deutsch.
-Halte deine Antworten kurz (1-3 Sätze), da sie vorgelesen werden.
 """
 
 
@@ -102,32 +95,76 @@ def generate_response(
     user_text: str,
     conversation_history: list[dict] | None = None,
     context: str | None = None,
+    available_flows: list[dict] | None = None,
 ) -> str:
     """
     Generiert eine natürlichsprachige Antwort (für Fallback/Allgemein).
-
-    Returns:
-        Antwort-Text als String
+    Kennt die verfügbaren Flows und kann gezielt auf Anliegen hinweisen.
     """
-    system = SYSTEM_PROMPT_CHAT
-    if context:
-        system += f"\n\nKontext: {context}"
+    capabilities = ""
+    if available_flows:
+        flow_names = [f.get("name", f.get("intent", "")) for f in available_flows]
+        capabilities = f"\nDu kannst bei folgenden Anliegen helfen: {', '.join(flow_names)}."
 
-    messages = build_messages(
-        conversation_history or [],
-        user_text,
-        system,
+    system = (
+        "Du bist ein freundlicher, intelligenter Sprachbot-Assistent. "
+        "Antworte präzise, höflich und auf Deutsch. "
+        "Halte deine Antworten kurz (1-3 Sätze), da sie vorgelesen werden."
+        + capabilities
+        + ("\n\nKontext: " + context if context else "")
     )
 
-    payload = {
+    messages = build_messages(conversation_history or [], user_text, system)
+
+    result = mistral_post_json("/chat/completions", {
         "model": MISTRAL_LLM_MODEL,
         "messages": messages,
         "temperature": 0.7,
         "max_tokens": 300,
-    }
-
-    result = mistral_post_json("/chat/completions", payload)
+    })
     return result["choices"][0]["message"]["content"].strip()
+
+
+def generate_slot_reply(
+    user_text: str,
+    flow_name: str,
+    next_question: str,
+    collected_slots: dict,
+    conversation_history: list[dict] | None = None,
+) -> str:
+    """
+    Generiert eine natürliche Antwort während der Slot-Sammlung.
+    Geht auf das Gesagte ein und stellt die nächste Frage konversationell.
+    """
+    slots_summary = ""
+    if collected_slots:
+        parts = [f"{k}: {v}" for k, v in collected_slots.items() if v]
+        if parts:
+            slots_summary = f"Bereits bekannt: {', '.join(parts)}. "
+
+    system = (
+        f"Du bist ein freundlicher Sprachbot-Assistent und führst gerade den Prozess '{flow_name}' durch. "
+        f"{slots_summary}"
+        "Deine Aufgabe: Reagiere kurz auf die letzte Aussage des Nutzers (1 Satz), "
+        "dann stelle die folgende Frage auf natürliche Weise. "
+        "Antworte ausschließlich auf Deutsch, maximal 2 Sätze, für Vorlesen optimiert. "
+        "Keine Aufzählungen, keine Formatierungen."
+        f"\n\nZu stellende Frage: {next_question}"
+    )
+
+    messages = build_messages(conversation_history or [], user_text, system)
+
+    try:
+        result = mistral_post_json("/chat/completions", {
+            "model": MISTRAL_LLM_MODEL,
+            "messages": messages,
+            "temperature": 0.4,
+            "max_tokens": 150,
+        })
+        return result["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        logger.warning("generate_slot_reply fehlgeschlagen, Fallback: %s", e)
+        return next_question
 
 
 def _format_flows(flows: list[dict]) -> str:

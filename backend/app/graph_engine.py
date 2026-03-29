@@ -12,9 +12,9 @@ Node-Typen:
 """
 import logging
 
-from .flow_engine import normalize_slot, render_template, validate_slot
 from .llm_service import MistralError, generate_response, generate_slot_reply
 from .mistral_client import MistralError as MistralClientError
+from .slot_utils import normalize_slot, render_template, validate_slot
 
 logger = logging.getLogger(__name__)
 

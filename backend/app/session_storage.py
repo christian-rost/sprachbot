@@ -29,6 +29,7 @@ def _db_to_session(row: dict) -> dict:
         "intent": ctx.get("intent"),
         "slots": row.get("current_slots") or {},
         "turn_count": ctx.get("turn_count", 0),
+        "current_node_id": ctx.get("current_node_id"),
         "created_at": str(row.get("started_at") or row.get("created_at") or _now()),
         "updated_at": str(row.get("ended_at") or row.get("started_at") or row.get("updated_at") or _now()),
     }
@@ -98,15 +99,20 @@ def update_session(session_id: str, updates: dict) -> dict | None:
             db_updates = {}
             if "status" in updates:
                 db_updates["status"] = updates["status"]
-            if "slots" in updates or "intent" in updates or "turn_count" in updates:
+            if "slots" in updates or "intent" in updates or "turn_count" in updates or "current_node_id" in updates:
                 # context + current_slots zusammenführen
                 existing = get_session(session_id)
-                ctx = {"intent": existing.get("intent") if existing else None,
-                       "turn_count": existing.get("turn_count", 0) if existing else 0}
+                ctx = {
+                    "intent": existing.get("intent") if existing else None,
+                    "turn_count": existing.get("turn_count", 0) if existing else 0,
+                    "current_node_id": existing.get("current_node_id") if existing else None,
+                }
                 if "intent" in updates:
                     ctx["intent"] = updates["intent"]
                 if "turn_count" in updates:
                     ctx["turn_count"] = updates["turn_count"]
+                if "current_node_id" in updates:
+                    ctx["current_node_id"] = updates["current_node_id"]
                 db_updates["context"] = ctx
                 if "slots" in updates:
                     db_updates["current_slots"] = updates["slots"]

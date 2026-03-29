@@ -11,6 +11,7 @@ import logging
 import re
 
 from .flow_storage import get_flow_by_intent, list_flows
+from .graph_engine import is_graph_flow, process_graph_turn
 from .llm_service import detect_intent, generate_response, generate_slot_reply
 from .mistral_client import MistralError
 
@@ -170,6 +171,11 @@ def process_turn(
         }
 
     definition = flow.get("definition", {})
+
+    # Graph-basierter Flow → an Graph-Engine delegieren
+    if is_graph_flow(definition):
+        return process_graph_turn(user_text, session, messages, flow, flows_for_llm)
+
     slot_defs = definition.get("slots", {})
     max_turns = definition.get("max_turns", 10)
 

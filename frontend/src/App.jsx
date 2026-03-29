@@ -25,6 +25,7 @@ import {
   upsertProvider,
 } from "./api"
 import VoiceRecorder from "./VoiceRecorder"
+import FlowEditor from "./FlowEditor"
 
 // ---------------------------------------------------------------------------
 // Design tokens — xqt5 design system
@@ -1247,6 +1248,7 @@ function FlowsSection() {
   const [error, setError] = useState("")
   const [editFlow, setEditFlow] = useState(null)   // null = closed, false = create new, flow obj = edit
   const [showModal, setShowModal] = useState(false)
+  const [editorFlow, setEditorFlow] = useState(null) // flow obj for visual editor, null = closed
 
   useEffect(() => { load() }, [])
 
@@ -1324,7 +1326,7 @@ function FlowsSection() {
                     </td>
                     <td style={{ padding: "12px 16px" }}>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <Btn small variant="ghost" onClick={() => { setEditFlow(f); setShowModal(true) }}>Bearbeiten</Btn>
+                        <Btn small variant="ghost" onClick={() => setEditorFlow(f)}>Bearbeiten</Btn>
                         <Btn small variant="danger" onClick={() => handleDelete(f.id, f.name)}>Löschen</Btn>
                       </div>
                     </td>
@@ -1341,6 +1343,14 @@ function FlowsSection() {
           webhooks={webhooks}
           onClose={() => { setShowModal(false); setEditFlow(null) }}
           onSave={handleSave}
+        />
+      )}
+      {editorFlow && (
+        <FlowEditor
+          flow={editorFlow}
+          webhooks={webhooks}
+          onClose={() => setEditorFlow(null)}
+          onSave={async (flowId, data) => { await handleSave(flowId, data); setEditorFlow(null) }}
         />
       )}
     </div>

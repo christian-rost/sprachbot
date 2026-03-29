@@ -231,6 +231,7 @@ function VoiceView({ user, onLogout, onAdmin }) {
   const [transcript, setTranscript] = useState("")
   const [processing, setProcessing] = useState(false)
   const [ttsEnabled, setTtsEnabled] = useState(false)
+  const [micMode, setMicMode] = useState(() => localStorage.getItem("sb_mic_mode") || "click")
   const [debugData, setDebugData] = useState(null)
   const [showDebug, setShowDebug] = useState(false)
   const [error, setError] = useState("")
@@ -420,13 +421,34 @@ function VoiceView({ user, onLogout, onAdmin }) {
           <ErrorBanner msg={error} />
 
           <VoiceRecorder
+            mode={micMode}
             onTranscript={handleTranscript}
             onError={setError}
             disabled={!session || processing}
           />
 
-          {/* TTS Toggle + Debug */}
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {/* Controls */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+            {/* Mic mode toggle */}
+            <div style={{
+              display: "flex", borderRadius: 20, overflow: "hidden",
+              border: `1px solid ${C.border}`, fontSize: 12,
+            }}>
+              {[["click", "🎤 Klicken"], ["hold", "🤏 Halten"]].map(([m, label]) => (
+                <button
+                  key={m}
+                  onClick={() => { setMicMode(m); localStorage.setItem("sb_mic_mode", m) }}
+                  style={{
+                    padding: "4px 12px", border: "none", cursor: "pointer",
+                    fontWeight: micMode === m ? 600 : 400,
+                    background: micMode === m ? C.primary : C.bg,
+                    color: micMode === m ? "#fff" : C.muted,
+                    fontSize: 12,
+                  }}
+                >{label}</button>
+              ))}
+            </div>
+
             <button
               onClick={() => setTtsEnabled(t => !t)}
               style={{

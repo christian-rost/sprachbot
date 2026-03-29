@@ -425,19 +425,66 @@ function flowDefToReactFlow(definition) {
       edges: definition.edges || [],
     }
   }
-  // Legacy flat format or empty → default template
-  return {
-    nodes: [
-      { id: "start-1", type: "start", position: { x: 300, y: 50 },
-        data: { label: "Start", nodeType: "start" } },
-      { id: "end-1", type: "end", position: { x: 300, y: 220 },
-        data: { label: "Ende", message: "Vielen Dank! Ihre Anfrage wurde bearbeitet.", nodeType: "end" } },
-    ],
-    edges: [
-      { id: "e-start-end", source: "start-1", target: "end-1",
-        ...defaultEdgeOptions },
-    ],
+
+  // Legacy flat format → automatisch in Graph konvertieren
+  const slots = definition?.slots ? Object.entries(definition.slots) : []
+  const action = definition?.action || {}
+  const successMsg = definition?.success_message || "Vielen Dank! Ihre Anfrage wurde bearbeitet."
+
+  const nodes = []
+  const edges = []
+  const X = 300
+  let y = 50
+  let prevId = null
+
+  const addEdge_ = (source, target) => {
+    edges.push({ id: `e-${source}-${target}`, source, target, ...defaultEdgeOptions })
   }
+
+  // Start
+  nodes.push({ id: "start-1", type: "start", position: { x: X, y }, data: { label: "Start", nodeType: "start" } })
+  prevId = "start-1"
+  y += 170
+
+  // Slot-Nodes aus bestehenden Slots
+  slots.forEach(([name, def], i) => {
+    const id = `slot-${i + 1}`
+    nodes.push({
+      id, type: "slot", position: { x: X, y },
+      data: {
+        label: def.question || name,
+        nodeType: "slot",
+        slot_name: name,
+        slot_type: def.type || "string",
+        question: def.question || `Bitte geben Sie ${name} an.`,
+        enum_values: Array.isArray(def.values) ? def.values.join(", ") : (def.values || ""),
+      },
+    })
+    addEdge_(prevId, id)
+    prevId = id
+    y += 170
+  })
+
+  // Webhook-Node falls Aktion vorhanden
+  if (action.type === "webhook" && action.webhook_id) {
+    const id = "webhook-1"
+    nodes.push({
+      id, type: "webhook", position: { x: X, y },
+      data: { label: "Webhook", nodeType: "webhook", webhook_id: action.webhook_id },
+    })
+    addEdge_(prevId, id)
+    prevId = id
+    y += 170
+  }
+
+  // End
+  nodes.push({
+    id: "end-1", type: "end", position: { x: X, y },
+    data: { label: "Ende", nodeType: "end", message: successMsg },
+  })
+  addEdge_(prevId, "end-1")
+
+  return { nodes, edges }
 }
 
 export default function FlowEditor({ flow, webhooks, onSave, onClose }) {

@@ -125,13 +125,15 @@ def update_session(session_id: str, updates: dict) -> dict | None:
     return None
 
 
-def list_sessions(user_id: str | None = None, limit: int = 100) -> list[dict]:
+def list_sessions(user_id: str | None = None, limit: int = 100, status: str | None = None) -> list[dict]:
     db = get_db()
     if db:
         try:
             q = db.table(SESSIONS_TABLE).select("*").order("started_at", desc=True).limit(limit)
             if user_id:
                 q = q.eq("user_id", user_id)
+            if status:
+                q = q.eq("status", status)
             return [_db_to_session(r) for r in q.execute().data]
         except Exception as e:
             logger.warning("Supabase session list fehlgeschlagen: %s", e)
@@ -139,7 +141,32 @@ def list_sessions(user_id: str | None = None, limit: int = 100) -> list[dict]:
     sessions = list(_mem_sessions.values())
     if user_id:
         sessions = [s for s in sessions if s["user_id"] == user_id]
+    if status:
+        sessions = [s for s in sessions if s.get("status") == status]
     return sessions[:limit]
+
+
+def close_active_sessions(user_id: str) -> int:
+    """Schließt alle aktiven Sessions eines Nutzers (abandoned). Gibt Anzahl zurück."""
+    db = get_db()
+    count = 0
+    if db:
+        try:
+            result = (
+                db.table(SESSIONS_TABLE)
+                .update({"status": "abandoned"})
+                .eq("user_id", user_id)
+                .eq("status", "active")
+                .execute()
+            )
+            count = len(result.data)
+        except Exception as e:
+            logger.warning("Session close_active fehlgeschlagen: %s", e)
+    for s in _mem_sessions.values():
+        if s.get("user_id") == user_id and s.get("status") == "active":
+            s["status"] = "abandoned"
+            count += 1
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +236,8 @@ def expire_inactive_sessions(timeout_minutes: int = 30) -> int:
     db = get_db()
     if db:
         try:
+            # Timeout basiert auf started_at (Erstellzeit) als Proxy für letzte Aktivität
+            # Sessions ohne jegliche Aktivität nach cutoff → timeout
             result = (
                 db.table(SESSIONS_TABLE)
                 .update({"status": "timeout"})

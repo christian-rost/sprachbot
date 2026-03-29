@@ -30,6 +30,7 @@ from .flow_storage import (
 from .mistral_client import MistralError
 from .session_storage import (
     add_message,
+    close_active_sessions,
     create_session,
     expire_inactive_sessions,
     get_session,
@@ -286,6 +287,11 @@ class SessionOut(BaseModel):
 
 @app.post("/api/sessions", response_model=SessionOut, status_code=201)
 def start_session(current_user: Dict = Depends(get_current_user)):
+    # Vorherige aktive Sessions dieses Nutzers schließen
+    closed = close_active_sessions(current_user["id"])
+    if closed:
+        logger.info("Session-Start: %d alte Session(s) für user %s geschlossen", closed, current_user["id"])
+
     session = create_session(user_id=current_user["id"])
     log_event(
         event_type="session_started",

@@ -255,10 +255,28 @@ def process_turn(
                 "updated_session": {"intent": None, "slots": {}, "status": "active"},
             }
 
-    # Webhook ausführen falls konfiguriert
+    # Aktion ausführen
     action_def = definition.get("action", {})
+    action_type = action_def.get("type", "none")
+
+    # LLM-Antwort (für Flows die direkt mit dem LLM antworten)
+    if action_type == "llm_response":
+        try:
+            reply = generate_response(user_text, messages, available_flows=flows_for_llm)
+        except MistralError:
+            reply = "Ich konnte Ihre Anfrage leider nicht verarbeiten. Bitte versuchen Sie es erneut."
+        return {
+            "reply": reply,
+            "intent": current_intent,
+            "slots": current_slots,
+            "action": "complete",
+            "flow_id": flow["id"],
+            "updated_session": {"intent": None, "slots": {}, "status": "active"},
+        }
+
+    # Webhook ausführen
     webhook_error = None
-    if action_def.get("type") == "webhook" and action_def.get("webhook_id"):
+    if action_type == "webhook" and action_def.get("webhook_id"):
         try:
             from .webhook_service import WebhookError, execute_webhook
             execute_webhook(
@@ -273,7 +291,7 @@ def process_turn(
 
     if webhook_error:
         return {
-            "reply": f"Die Aktion konnte leider nicht ausgeführt werden. Bitte versuchen Sie es später erneut.",
+            "reply": "Die Aktion konnte leider nicht ausgeführt werden. Bitte versuchen Sie es später erneut.",
             "intent": current_intent,
             "slots": current_slots,
             "action": "error",

@@ -138,9 +138,24 @@ def delete_flow(flow_id: str) -> bool:
     return False
 
 
+def _deactivate_problematic_flows() -> None:
+    """Deaktiviert Flows die keine sinnvolle Aktion haben (z.B. 'allgemeine_auskunft' ohne Slots)."""
+    db = get_db()
+    if db:
+        try:
+            db.table(FLOWS_TABLE).update({"is_active": False}).eq("intent_name", "allgemeine_auskunft").execute()
+        except Exception:
+            pass
+    # In-memory
+    for f in _mem_flows.values():
+        if f.get("intent_name") == "allgemeine_auskunft":
+            f["is_active"] = False
+
+
 def seed_example_flows() -> None:
-    """Legt Beispiel-Flows an falls noch keine vorhanden."""
-    existing = list_flows()
+    """Legt Beispiel-Flows an falls noch keine vorhanden. Bereinigt problematische Seed-Flows."""
+    _deactivate_problematic_flows()
+    existing = [f for f in list_flows() if f.get("intent_name") != "allgemeine_auskunft"]
     if existing:
         return
 
@@ -191,14 +206,27 @@ def seed_example_flows() -> None:
             },
         },
         {
-            "name": "Allgemeine Auskunft",
-            "intent_name": "allgemeine_auskunft",
-            "description": "Beantwortet allgemeine Fragen",
-            "priority": 1,
+            "name": "Benutzerkonto sperren",
+            "intent_name": "konto_sperren",
+            "description": "Sperrt ein Benutzerkonto",
+            "priority": 8,
             "definition": {
-                "slots": {},
-                "action": {"type": "llm_response"},
-                "max_turns": 5,
+                "slots": {
+                    "username": {
+                        "type": "string",
+                        "required": True,
+                        "question": "Welches Konto soll gesperrt werden?",
+                    },
+                    "bestaetigung": {
+                        "type": "boolean",
+                        "required": True,
+                        "question": "Sind Sie sicher, dass Sie dieses Konto sperren möchten? (Ja/Nein)",
+                    },
+                },
+                "confirmation": "Soll ich das Konto '{{username}}' wirklich sperren?",
+                "success_message": "Das Konto '{{username}}' wurde erfolgreich gesperrt.",
+                "action": {"type": "webhook"},
+                "max_turns": 6,
             },
         },
     ]

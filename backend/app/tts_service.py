@@ -4,6 +4,8 @@ Wählt automatisch eine verfügbare Stimme (bevorzugt Deutsch).
 """
 import base64
 import logging
+import re
+import time
 
 try:
     from mistralai import Mistral
@@ -65,6 +67,21 @@ def resolve_voice_id() -> str | None:
         return None
 
 
+def _strip_markdown(text: str) -> str:
+    """Entfernt Markdown-Formatierung für saubere Sprachausgabe."""
+    # **fett** und *kursiv* → Text
+    text = re.sub(r"\*{1,3}(.+?)\*{1,3}", r"\1", text)
+    # `code` → Text
+    text = re.sub(r"`(.+?)`", r"\1", text)
+    # [Link](url) → Link-Text
+    text = re.sub(r"\[(.+?)\]\(.+?\)", r"\1", text)
+    # Markdown-Überschriften (# ## ###)
+    text = re.sub(r"^#+\s+", "", text, flags=re.MULTILINE)
+    # Aufzählungszeichen
+    text = re.sub(r"^\s*[-*]\s+", "", text, flags=re.MULTILINE)
+    return text.strip()
+
+
 def synthesize(
     text: str,
     voice_id: str | None = None,
@@ -72,40 +89,43 @@ def synthesize(
 ) -> bytes:
     """
     Konvertiert Text zu Audio-Bytes via Mistral TTS SDK.
+    Bereinigt Markdown, versucht bis zu 2x bei 500-Fehlern.
     """
     if not text or not text.strip():
         raise ValueError("Kein Text für TTS angegeben")
 
+    clean_text = _strip_markdown(text)
     model = MISTRAL_TTS_MODEL or _DEFAULT_TTS_MODEL
     voice = voice_id or resolve_voice_id()
-    cache_key = f"{voice}:{response_format}:{text[:200]}"
+    cache_key = f"{voice}:{response_format}:{clean_text[:200]}"
 
     if cache_key in _cache:
         logger.debug("TTS: Cache-Treffer")
         return _cache[cache_key]
 
-    logger.info("TTS: Synthetisiere %d Zeichen, voice_id=%s", len(text), voice)
+    logger.info("TTS: Synthetisiere %d Zeichen, voice_id=%s", len(clean_text), voice)
 
     client = _get_client()
-
-    kwargs = dict(
-        model=model,
-        input=text,
-        response_format=response_format,
-    )
+    kwargs = dict(model=model, input=clean_text, response_format=response_format)
     if voice:
         kwargs["voice_id"] = voice
 
-    response = client.audio.speech.complete(**kwargs)
-    audio_bytes = base64.b64decode(response.audio_data)
+    last_err = None
+    for attempt in range(1, 3):
+        try:
+            response = client.audio.speech.complete(**kwargs)
+            audio_bytes = base64.b64decode(response.audio_data)
+            if not audio_bytes:
+                raise ValueError("TTS API hat kein Audio zurückgegeben")
+            logger.info("TTS: %d Bytes Audio generiert (Versuch %d)", len(audio_bytes), attempt)
+            if len(_cache) >= _MAX_CACHE:
+                del _cache[next(iter(_cache))]
+            _cache[cache_key] = audio_bytes
+            return audio_bytes
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                logger.warning("TTS Versuch %d fehlgeschlagen, retry: %s", attempt, e)
+                time.sleep(1)
 
-    if not audio_bytes:
-        raise ValueError("TTS API hat kein Audio zurückgegeben")
-
-    logger.info("TTS: %d Bytes Audio generiert", len(audio_bytes))
-
-    if len(_cache) >= _MAX_CACHE:
-        del _cache[next(iter(_cache))]
-    _cache[cache_key] = audio_bytes
-
-    return audio_bytes
+    raise last_err
